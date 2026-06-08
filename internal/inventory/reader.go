@@ -18,6 +18,13 @@ type dockerClient interface {
 // a signature drift in a future SDK bump fails the build here, not at the call.
 var _ dockerClient = (*client.Client)(nil)
 
+// DialDocker returns a Docker client for the unix socket at sock. It connects
+// lazily on first use, so a down daemon surfaces as docker: unavailable on Read
+// rather than failing startup.
+func DialDocker(sock string) (*client.Client, error) {
+	return client.New(client.WithHost("unix://" + sock))
+}
+
 // Reader reads running containers from a Docker daemon and renders them as an
 // Inventory. The agent uses it for its own host; the hub uses it for its local
 // host. host is the display name stamped on the result.
