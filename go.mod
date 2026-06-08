@@ -2,6 +2,8 @@ module github.com/elexation/dockwatch
 
 go 1.26
 
+toolchain go1.26.4
+
 require (
 	github.com/moby/moby/api v1.54.2
 	github.com/moby/moby/client v0.4.1
