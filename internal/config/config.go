@@ -131,7 +131,7 @@ func Load(environ []string) (*Config, []string, error) {
 
 		HTTPS: https,
 		// DW_TLS_CERT/DW_TLS_KEY both-or-neither cross-check is deferred to the
-		// Phase 4 web transport, where the listener that consumes them is built.
+		// web transport, where the listener that consumes them is built.
 		TLSCert:      env["DW_TLS_CERT"],
 		TLSKey:       env["DW_TLS_KEY"],
 		Domain:       domain,
