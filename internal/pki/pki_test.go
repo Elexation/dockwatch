@@ -314,3 +314,35 @@ func TestBootstrapRenewal(t *testing.T) {
 		t.Fatalf("events = %v, want renewed", kinds(ev))
 	}
 }
+
+func TestWriteFileOverwriteLeavesNoTemp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "k.pem")
+
+	if err := writeFile(path, []byte("first"), privPerm); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if err := writeFile(path, []byte("second"), privPerm); err != nil {
+		t.Fatalf("overwrite: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != "second" {
+		t.Fatalf("content = %q, want %q", got, "second")
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "k.pem" {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("dir contents = %v, want exactly [k.pem]", names)
+	}
+}

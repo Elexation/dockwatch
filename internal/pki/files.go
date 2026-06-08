@@ -258,12 +258,30 @@ func writeHub(dir string, leaf *Leaf) error {
 }
 
 func writeFile(path string, data []byte, perm os.FileMode) error {
-	if err := os.WriteFile(path, data, perm); err != nil {
+	// Write to a temp file in the same dir, then rename over the target so a
+	// reader never sees a partial file and the final mode lands atomically with
+	// the name. os.CreateTemp makes the temp 0600, so keys are never momentarily
+	// world-readable on overwrite.
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp for %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	// WriteFile applies perm only when creating; enforce it for overwrites too.
-	if err := os.Chmod(path, perm); err != nil {
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
 		return fmt.Errorf("chmod %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("rename %s: %w", path, err)
 	}
 	return nil
 }
