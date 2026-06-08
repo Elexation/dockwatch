@@ -1,0 +1,9 @@
+# Enforce LF line endings in the repo and working tree. This project builds
+# Linux containers (FROM scratch, shell-free); CRLF must never reach a
+# Dockerfile, shell script, or embedded asset.
+* text=auto eol=lf
+
+# Binary assets (no line-ending conversion).
+*.png binary
+*.ico binary
+*.woff2 binary

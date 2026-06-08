@@ -1,0 +1,9 @@
+# Build output
+/dockwatch
+/dockwatch.exe
+
+# Runtime secrets & state, never commit to a public repo
+/certs/
+/data/
+*.key
+*.pem
