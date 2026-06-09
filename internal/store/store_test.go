@@ -73,7 +73,10 @@ func TestAllChecks(t *testing.T) {
 func TestAgentRoundTrip(t *testing.T) {
 	s := openTemp(t)
 	now := time.Now().Truncate(time.Second)
-	want := AgentStatus{Name: "home", LastOK: true, LastPoll: now, ConsecutiveFailures: 0, DownNotified: false}
+	want := AgentStatus{
+		Name: "home", LastOK: true, LastPoll: now, ConsecutiveFailures: 0, DownNotified: false,
+		LastWireV: 1, WireNotifiedV: 2, CertNotAfter: now.Add(time.Hour), LastRenewalReminder: now,
+	}
 	if err := s.PutAgent(want); err != nil {
 		t.Fatalf("PutAgent: %v", err)
 	}
@@ -83,6 +86,33 @@ func TestAgentRoundTrip(t *testing.T) {
 	}
 	if got.LastOK != want.LastOK || got.ConsecutiveFailures != want.ConsecutiveFailures || !got.LastPoll.Equal(want.LastPoll) {
 		t.Errorf("got %+v, want %+v", got, want)
+	}
+	if got.LastWireV != want.LastWireV || got.WireNotifiedV != want.WireNotifiedV ||
+		!got.CertNotAfter.Equal(want.CertNotAfter) || !got.LastRenewalReminder.Equal(want.LastRenewalReminder) {
+		t.Errorf("new fields not round-tripped: got %+v, want %+v", got, want)
+	}
+}
+
+func TestNotifiedRoundTrip(t *testing.T) {
+	s := openTemp(t)
+	now := time.Now().Truncate(time.Second)
+	want := NotifiedState{Ref: "gitea/gitea:1.24.3", Version: "1.25.0", Digest: "sha256:idx", NotifiedAt: now}
+	if err := s.PutNotified(want); err != nil {
+		t.Fatalf("PutNotified: %v", err)
+	}
+	got, found, err := s.GetNotified(want.Ref)
+	if err != nil || !found {
+		t.Fatalf("GetNotified: found=%v err=%v", found, err)
+	}
+	if got.Version != want.Version || got.Digest != want.Digest || !got.NotifiedAt.Equal(want.NotifiedAt) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestGetNotifiedMissing(t *testing.T) {
+	s := openTemp(t)
+	if _, found, err := s.GetNotified("nope:1"); err != nil || found {
+		t.Errorf("found=%v err=%v, want found=false err=nil", found, err)
 	}
 }
 

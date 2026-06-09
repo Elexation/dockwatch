@@ -14,6 +14,12 @@ type AgentStatus struct {
 	LastPoll            time.Time `json:"last_poll"`
 	ConsecutiveFailures int       `json:"consecutive_failures"`
 	DownNotified        bool      `json:"down_notified"`
+
+	LastWireV     int `json:"last_wire_v,omitempty"`     // wire version seen on the last OK poll
+	WireNotifiedV int `json:"wire_notified_v,omitempty"` // wire version already alerted on (once-per-detection gate)
+
+	CertNotAfter        time.Time `json:"cert_not_after,omitempty"`        // expiry of the cert served on the last OK poll
+	LastRenewalReminder time.Time `json:"last_renewal_reminder,omitempty"` // last weekly "bundle not installed" reminder
 }
 
 func (s *Store) PutAgent(a AgentStatus) error {
