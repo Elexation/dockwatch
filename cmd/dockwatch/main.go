@@ -1,17 +1,24 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/elexation/dockwatch/internal/agentserver"
 	"github.com/elexation/dockwatch/internal/config"
+	"github.com/elexation/dockwatch/internal/hub"
 	"github.com/elexation/dockwatch/internal/inventory"
 	"github.com/elexation/dockwatch/internal/pki"
+	"github.com/elexation/dockwatch/internal/registry"
+	"github.com/elexation/dockwatch/internal/store"
 )
 
 // Overridden via -ldflags at build time.
@@ -64,9 +71,8 @@ func run() {
 	}
 }
 
-// runHub runs the PKI bootstrap (minting whatever certs are missing), then
-// idles. The hub core (scheduler, registry, notifications, web) is not built
-// yet; until it is, the process idles so the container stays up.
+// runHub bootstraps the PKI, then runs the check scheduler until a termination
+// signal; a missing hub client identity degrades the hub to local-only.
 func runHub(cfg *config.Config) {
 	refs := make([]pki.AgentRef, 0, len(cfg.Agents))
 	for _, a := range cfg.Agents {
@@ -86,9 +92,56 @@ func runHub(cfg *config.Config) {
 		slog.Error("PKI bootstrap failed", "err", err)
 		os.Exit(1)
 	}
-
 	slog.Info("PKI bootstrap complete", "certs", cfg.CertsDir)
-	select {} // idle; Docker's SIGTERM still terminates the process
+
+	st, err := store.Open(cfg.DataDir)
+	if err != nil {
+		slog.Error("open store", "err", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+
+	cli, err := inventory.DialDocker(cfg.DockerSock)
+	if err != nil {
+		slog.Error("docker client init failed", "err", err)
+		os.Exit(1)
+	}
+	local := inventory.NewReader(cli, cfg.LocalName)
+
+	logger := slog.Default()
+	var client *http.Client
+	agents := make([]hub.Agent, 0, len(cfg.Agents))
+	if len(cfg.Agents) > 0 {
+		cert, pool, lerr := pki.LoadHubClient(cfg.CertsDir)
+		if lerr != nil {
+			slog.Error("load hub client identity; running local-only", "err", lerr)
+		} else {
+			client = hub.NewClient(cert, pool)
+			for _, a := range cfg.Agents {
+				agents = append(agents, hub.Agent{Name: a.Name, URL: a.URL})
+			}
+		}
+	}
+
+	// renew re-runs the startup minting/renewal rules; the scheduler calls it daily.
+	renew := func() {
+		ev, rerr := pki.Bootstrap(cfg.CertsDir, refs, time.Now())
+		for _, e := range ev {
+			logEvent(e)
+		}
+		if rerr != nil {
+			slog.Error("cert renewal failed", "err", rerr)
+		}
+	}
+
+	p := hub.NewPoller(local, agents, client, st, logger)
+	sched := hub.NewScheduler(p, registry.New(), st, logger, cfg.Interval, renew)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	slog.Info("hub running", "interval", cfg.Interval, "agents", len(agents))
+	sched.Run(ctx)
 }
 
 func runAgent(cfg *config.Config) {
@@ -98,9 +151,7 @@ func runAgent(cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	// The agent reports its OS hostname; the hub overrides the display name from
-	// DW_AGENT_<NAME>_URL, so a hostname lookup failure degrades to a placeholder
-	// rather than refusing to serve.
+	// A hostname-lookup failure is non-fatal: the hub overrides this name from the agent URL anyway.
 	host, err := os.Hostname()
 	if err != nil {
 		slog.Warn("hostname lookup failed; using placeholder", "err", err)
