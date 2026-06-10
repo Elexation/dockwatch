@@ -47,9 +47,10 @@ const (
 // Event is one notable thing Bootstrap did or noticed. Events feed logging now
 // and notifications (ntfy) later.
 type Event struct {
-	Kind EventKind
-	Name string // agent name, when relevant
-	Msg  string
+	Kind   EventKind
+	Name   string // agent name, when relevant
+	Detail string // structured detail for notification rendering (CA-key-missing)
+	Msg    string
 }
 
 // Bootstrap applies the startup minting and renewal rules against dir: mint
@@ -135,7 +136,7 @@ func ensureHubCert(dir string, ca *CA, now time.Time, events *[]Event) error {
 
 func mintHub(dir string, ca *CA, now time.Time, events *[]Event, kind EventKind, msg, need string) error {
 	if ca.Key == nil {
-		*events = append(*events, caKeyMissingEvent(need))
+		*events = append(*events, caKeyMissingEvent(need, ""))
 		return nil
 	}
 	leaf, err := ca.MintHubClient(now)
@@ -179,7 +180,7 @@ func ensureBundle(dir string, ca *CA, a AgentRef, now time.Time, events *[]Event
 
 func remintBundle(dir string, ca *CA, a AgentRef, now time.Time, events *[]Event, kind EventKind, msg string) error {
 	if ca.Key == nil {
-		*events = append(*events, caKeyMissingEvent(fmt.Sprintf("bundle for agent %q", a.Name)))
+		*events = append(*events, caKeyMissingEvent(fmt.Sprintf("bundle for agent %q", a.Name), a.Name))
 		return nil
 	}
 	leaf, err := ca.MintAgentServer(now, a.Host)
@@ -228,8 +229,13 @@ func noteOrphans(dir string, agents []AgentRef, events *[]Event) error {
 	return nil
 }
 
-func caKeyMissingEvent(what string) Event {
-	return Event{Kind: CAKeyMissing, Msg: fmt.Sprintf("ca.key absent: cannot complete %s; restore ca.key", what)}
+func caKeyMissingEvent(detail, name string) Event {
+	return Event{
+		Kind:   CAKeyMissing,
+		Name:   name,
+		Detail: detail,
+		Msg:    fmt.Sprintf("ca.key absent: cannot complete %s; restore ca.key", detail),
+	}
 }
 
 func writeCA(dir string, ca *CA) error {

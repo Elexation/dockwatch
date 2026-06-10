@@ -91,17 +91,17 @@ func (p *Poller) Gather(ctx context.Context, now time.Time) []inventory.Inventor
 			defer wg.Done()
 			actx, cancel := context.WithTimeout(ctx, p.pollTimeout)
 			defer cancel()
-			inv, err := p.fetchAgent(actx, a)
+			inv, certNotAfter, err := p.fetchAgent(actx, a)
 			if err != nil {
 				p.logger.Warn("agent poll failed", "agent", a.Name, "err", err)
-				p.recordAgent(a.Name, false, now)
+				p.recordAgent(a.Name, false, 0, time.Time{}, now)
 				return
 			}
 			inv.Host = a.Name // hub owns the display name, not the agent's hostname
 			if inv.V != inventory.WireVersion {
 				p.logger.Warn("agent wire version mismatch", "agent", a.Name, "agent_v", inv.V, "hub_v", inventory.WireVersion)
 			}
-			p.recordAgent(a.Name, true, now)
+			p.recordAgent(a.Name, true, inv.V, certNotAfter, now)
 			slots[1+i] = slot{inv: inv, include: true}
 		}(i, a)
 	}
@@ -116,29 +116,38 @@ func (p *Poller) Gather(ctx context.Context, now time.Time) []inventory.Inventor
 	return out
 }
 
-func (p *Poller) fetchAgent(ctx context.Context, a Agent) (inventory.Inventory, error) {
+// fetchAgent retrieves an agent's inventory and the NotAfter of the leaf cert it
+// served, used to detect a renewed-but-uninstalled bundle. A missing TLS state
+// or peer chain yields a zero time.
+func (p *Poller) fetchAgent(ctx context.Context, a Agent) (inventory.Inventory, time.Time, error) {
 	u := strings.TrimRight(a.URL, "/") + "/v1/inventory"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return inventory.Inventory{}, err
+		return inventory.Inventory{}, time.Time{}, err
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return inventory.Inventory{}, err
+		return inventory.Inventory{}, time.Time{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return inventory.Inventory{}, fmt.Errorf("status %d", resp.StatusCode)
+		return inventory.Inventory{}, time.Time{}, fmt.Errorf("status %d", resp.StatusCode)
 	}
 	var inv inventory.Inventory
 	if err := json.NewDecoder(resp.Body).Decode(&inv); err != nil {
-		return inventory.Inventory{}, fmt.Errorf("decode inventory: %w", err)
+		return inventory.Inventory{}, time.Time{}, fmt.Errorf("decode inventory: %w", err)
 	}
-	return inv, nil
+	var certNotAfter time.Time
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		certNotAfter = resp.TLS.PeerCertificates[0].NotAfter
+	}
+	return inv, certNotAfter, nil
 }
 
-// recordAgent updates poll status; DownNotified is the notifier's gate, left untouched.
-func (p *Poller) recordAgent(name string, ok bool, now time.Time) {
+// recordAgent updates poll status; DownNotified is the notifier's gate, left
+// untouched. On an OK poll it records the agent's wire version and served-cert
+// expiry (the latter only when non-zero); a failed poll leaves both intact.
+func (p *Poller) recordAgent(name string, ok bool, wireV int, certNotAfter, now time.Time) {
 	st, _, err := p.store.GetAgent(name)
 	if err != nil {
 		p.logger.Warn("read agent status", "agent", name, "err", err)
@@ -148,6 +157,10 @@ func (p *Poller) recordAgent(name string, ok bool, now time.Time) {
 	st.LastOK = ok
 	if ok {
 		st.ConsecutiveFailures = 0
+		st.LastWireV = wireV
+		if !certNotAfter.IsZero() {
+			st.CertNotAfter = certNotAfter
+		}
 	} else {
 		st.ConsecutiveFailures++
 	}

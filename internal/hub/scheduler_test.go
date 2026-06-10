@@ -36,7 +36,7 @@ func (f fixedLocal) Read(context.Context) (inventory.Inventory, error) {
 func TestMergeGate(t *testing.T) {
 	st := openStore(t)
 	p := NewPoller(emptyLocal{}, nil, nil, st, quietLogger())
-	s := NewScheduler(p, &fakeReg{}, st, quietLogger(), time.Hour, nil)
+	s := NewScheduler(p, &fakeReg{}, st, quietLogger(), time.Hour, nil, nil)
 	s.startup = func() time.Duration { return 0 }
 	ft := newFakeTimer()
 	s.newTimer = func(time.Duration) schedTimer { return ft }
@@ -69,7 +69,7 @@ func TestMergeGate(t *testing.T) {
 func TestTimerReset(t *testing.T) {
 	st := openStore(t)
 	p := NewPoller(emptyLocal{}, nil, nil, st, quietLogger())
-	s := NewScheduler(p, &fakeReg{}, st, quietLogger(), 42*time.Minute, nil)
+	s := NewScheduler(p, &fakeReg{}, st, quietLogger(), 42*time.Minute, nil, nil)
 	s.startup = func() time.Duration { return 0 }
 	s.cycle = func(context.Context, bool) {}
 	ft := newFakeTimer()
@@ -178,7 +178,7 @@ func TestRunCycleRateLimitCooldown(t *testing.T) {
 func newPipelineScheduler(t *testing.T, local localReader, reg RegistryClient, st *store.Store) *Scheduler {
 	t.Helper()
 	p := NewPoller(local, nil, nil, st, quietLogger())
-	s := NewScheduler(p, reg, st, quietLogger(), time.Hour, nil)
+	s := NewScheduler(p, reg, st, quietLogger(), time.Hour, nil, nil)
 	s.imgJitter = func() time.Duration { return 0 }
 	s.sleep = func(context.Context, time.Duration) {}
 	return s

@@ -4,10 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"math/rand/v2"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/elexation/dockwatch/internal/inventory"
+	"github.com/elexation/dockwatch/internal/notify"
 	"github.com/elexation/dockwatch/internal/store"
 	"github.com/google/go-containerregistry/pkg/name"
 )
@@ -44,7 +46,8 @@ type Scheduler struct {
 	doorbell chan struct{} // buffered(1); a non-blocking send is a trigger
 	force    atomic.Bool   // set by Trigger, swapped false at cycle start
 
-	renew func() // opaque cert-renewal closure; keeps this package off pki
+	renew    func()           // opaque cert-renewal closure; keeps this package off pki
+	notifier *notify.Notifier // nil for a hub built without notifications
 
 	cycle     func(ctx context.Context, force bool)
 	newTimer  func(d time.Duration) schedTimer
@@ -53,8 +56,9 @@ type Scheduler struct {
 	sleep     func(ctx context.Context, d time.Duration)
 }
 
-// NewScheduler wires the cycle dependencies; renew may be nil for a local-only hub.
-func NewScheduler(p *Poller, reg RegistryClient, st *store.Store, logger *slog.Logger, interval time.Duration, renew func()) *Scheduler {
+// NewScheduler wires the cycle dependencies; renew may be nil for a local-only
+// hub and notifier may be nil when notifications are disabled.
+func NewScheduler(p *Poller, reg RegistryClient, st *store.Store, logger *slog.Logger, interval time.Duration, renew func(), notifier *notify.Notifier) *Scheduler {
 	s := &Scheduler{
 		poller:   p,
 		reg:      reg,
@@ -63,6 +67,7 @@ func NewScheduler(p *Poller, reg RegistryClient, st *store.Store, logger *slog.L
 		interval: interval,
 		doorbell: make(chan struct{}, 1),
 		renew:    renew,
+		notifier: notifier,
 	}
 	s.cycle = s.runCycle
 	s.newTimer = newRealTimer
@@ -155,13 +160,14 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 	now := time.Now()
 	refs := s.dedup(s.poller.Gather(ctx, now))
 
+	var inputs []notify.UpdateInput
 	cooled := make(map[string]bool) // registries that returned 429 this cycle
 	first := true
-	for ref, kind := range refs {
+	for ref, agg := range refs {
 		if ctx.Err() != nil {
-			return
+			return // shutdown mid-cycle intentionally skips notifying
 		}
-		if kind == KindLocal { // not checkable: persist a marker, no registry call
+		if agg.kind == KindLocal { // not checkable: persist a marker, no registry call
 			tag, _ := tagOf(ref)
 			s.put(store.CheckResult{Ref: ref, Kind: KindLocal.String(), Status: store.StatusOK, Current: tag, CheckedAt: now})
 			continue
@@ -174,7 +180,7 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 
 		host := registryOf(ref)
 		if cooled[host] {
-			s.put(store.CheckResult{Ref: ref, Kind: kind.String(), Status: store.StatusRateLimited, CheckedAt: now})
+			s.put(store.CheckResult{Ref: ref, Kind: agg.kind.String(), Status: store.StatusRateLimited, CheckedAt: now})
 			continue
 		}
 
@@ -188,25 +194,118 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 			cooled[host] = true
 		}
 		s.put(res)
-		// notify diff against stored state and ntfy goes here.
+
+		if res.Status == store.StatusOK {
+			current := res.Current // SEMVER records the running tag; DIGEST does not
+			if agg.kind == KindDigest {
+				current, _ = tagOf(ref)
+			}
+			inputs = append(inputs, notify.UpdateInput{
+				Ref:            ref,
+				Current:        current,
+				Latest:         res.Latest,
+				UpdateKind:     res.UpdateKind,
+				RegistryDigest: res.RegistryDigest,
+				RunningDigest:  agg.runningDigest,
+				Hosts:          agg.hosts,
+			})
+		}
+	}
+
+	if s.notifier != nil {
+		s.notifier.NotifyUpdates(ctx, inputs, now)
+		s.notifier.NotifyAgents(ctx, now)
 	}
 }
 
-// dedup collapses running, watched containers to unique image refs; a checkable classification beats LOCAL when a ref appears as both.
-func (s *Scheduler) dedup(invs []inventory.Inventory) map[string]Kind {
-	out := make(map[string]Kind)
+// refAgg collects, per image reference, the facts the notifier joins across all
+// hosts running it.
+type refAgg struct {
+	kind          Kind
+	runningDigest string
+	hosts         []string
+}
+
+// dedup collapses running, watched containers to unique image refs, accumulating
+// the hosts and a running digest per ref; a checkable classification beats LOCAL
+// when a ref appears as both.
+func (s *Scheduler) dedup(invs []inventory.Inventory) map[string]*refAgg {
+	out := make(map[string]*refAgg)
 	for _, inv := range invs {
 		for _, c := range inv.Containers {
 			if c.State != "running" || c.Labels["dw.watch"] == "false" {
 				continue
 			}
-			if prev, ok := out[c.Image]; ok && prev != KindLocal {
-				continue
+			agg, ok := out[c.Image]
+			if !ok {
+				agg = &refAgg{kind: Classify(c)}
+				out[c.Image] = agg
+			} else if agg.kind == KindLocal {
+				agg.kind = Classify(c)
 			}
-			out[c.Image] = Classify(c)
+			if inv.Host != "" {
+				agg.hosts = appendUnique(agg.hosts, inv.Host)
+			}
+			if agg.runningDigest == "" {
+				agg.runningDigest = runningDigest(c, c.Image)
+			}
 		}
 	}
 	return out
+}
+
+// runningDigest returns the index digest the container runs for ref: the sha256
+// from the repo_digests entry whose repository matches ref, else the first
+// entry. Docker records repo_digests at the index level, so this is the value
+// comparable to the registry's top-level digest.
+func runningDigest(c inventory.Container, ref string) string {
+	want := bareRepo(ref)
+	first := ""
+	for _, rd := range c.RepoDigests {
+		at := strings.IndexByte(rd, '@')
+		if at < 0 {
+			continue
+		}
+		repo, dig := rd[:at], rd[at+1:]
+		if first == "" {
+			first = dig
+		}
+		if bareRepo(repo) == want {
+			return dig
+		}
+	}
+	return first
+}
+
+// bareRepo reduces a reference or repo_digest entry to its repository path,
+// dropping any registry host, tag, and digest so two spellings of the same image
+// compare equal.
+func bareRepo(s string) string {
+	if i := strings.IndexByte(s, '@'); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.LastIndexByte(s, '/'); i >= 0 {
+		if j := strings.IndexByte(s[i+1:], ':'); j >= 0 {
+			s = s[:i+1+j]
+		}
+	} else if j := strings.IndexByte(s, ':'); j >= 0 {
+		s = s[:j]
+	}
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		if host := s[:i]; strings.ContainsAny(host, ".:") || host == "localhost" {
+			s = s[i+1:]
+		}
+	}
+	return s
+}
+
+func appendUnique(ss []string, v string) []string {
+	for _, s := range ss {
+		if s == v {
+			return ss
+		}
+	}
+	return append(ss, v)
 }
 
 // registryOf returns ref's registry host for the per-cycle 429 cooldown; "" if unparseable.

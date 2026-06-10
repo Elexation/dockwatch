@@ -16,6 +16,7 @@ import (
 	"github.com/elexation/dockwatch/internal/config"
 	"github.com/elexation/dockwatch/internal/hub"
 	"github.com/elexation/dockwatch/internal/inventory"
+	"github.com/elexation/dockwatch/internal/notify"
 	"github.com/elexation/dockwatch/internal/pki"
 	"github.com/elexation/dockwatch/internal/registry"
 	"github.com/elexation/dockwatch/internal/store"
@@ -74,6 +75,8 @@ func run() {
 // runHub bootstraps the PKI, then runs the check scheduler until a termination
 // signal; a missing hub client identity degrades the hub to local-only.
 func runHub(cfg *config.Config) {
+	logger := slog.Default()
+
 	refs := make([]pki.AgentRef, 0, len(cfg.Agents))
 	for _, a := range cfg.Agents {
 		u, err := url.Parse(a.URL) // already validated in config.Load
@@ -84,22 +87,25 @@ func runHub(cfg *config.Config) {
 		refs = append(refs, pki.AgentRef{Name: a.Name, Host: u.Hostname()})
 	}
 
-	events, err := pki.Bootstrap(cfg.CertsDir, refs, time.Now())
-	for _, e := range events {
-		logEvent(e)
-	}
-	if err != nil {
-		slog.Error("PKI bootstrap failed", "err", err)
-		os.Exit(1)
-	}
-	slog.Info("PKI bootstrap complete", "certs", cfg.CertsDir)
-
 	st, err := store.Open(cfg.DataDir)
 	if err != nil {
 		slog.Error("open store", "err", err)
 		os.Exit(1)
 	}
 	defer st.Close()
+
+	// Build the notifier before Bootstrap so a startup cert renewal/remint can
+	// notify. It no-ops when DW_NTFY_TOPIC is unset, so building it is always safe.
+	ntfy := notify.NewClient(cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, nil)
+	notifier := notify.NewNotifier(ntfy, st, logger, cfg.Domain, stagedExpiry(cfg.CertsDir))
+
+	events, err := pki.Bootstrap(cfg.CertsDir, refs, time.Now())
+	handleCertEvents(context.Background(), events, notifier)
+	if err != nil {
+		slog.Error("PKI bootstrap failed", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("PKI bootstrap complete", "certs", cfg.CertsDir)
 
 	cli, err := inventory.DialDocker(cfg.DockerSock)
 	if err != nil {
@@ -108,7 +114,6 @@ func runHub(cfg *config.Config) {
 	}
 	local := inventory.NewReader(cli, cfg.LocalName)
 
-	logger := slog.Default()
 	var client *http.Client
 	agents := make([]hub.Agent, 0, len(cfg.Agents))
 	if len(cfg.Agents) > 0 {
@@ -126,16 +131,14 @@ func runHub(cfg *config.Config) {
 	// renew re-runs the startup minting/renewal rules; the scheduler calls it daily.
 	renew := func() {
 		ev, rerr := pki.Bootstrap(cfg.CertsDir, refs, time.Now())
-		for _, e := range ev {
-			logEvent(e)
-		}
+		handleCertEvents(context.Background(), ev, notifier)
 		if rerr != nil {
 			slog.Error("cert renewal failed", "err", rerr)
 		}
 	}
 
 	p := hub.NewPoller(local, agents, client, st, logger)
-	sched := hub.NewScheduler(p, registry.New(), st, logger, cfg.Interval, renew)
+	sched := hub.NewScheduler(p, registry.New(), st, logger, cfg.Interval, renew, notifier)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -173,6 +176,43 @@ func runAgent(cfg *config.Config) {
 	if err := srv.ListenAndServe(); err != nil {
 		slog.Error("agent server stopped", "err", err)
 		os.Exit(1)
+	}
+}
+
+// stagedExpiry returns a closure giving an agent's on-disk bundle leaf expiry.
+// Any read or parse failure reports ok=false, disabling the reminder for that
+// agent rather than guessing.
+func stagedExpiry(certsDir string) func(agent string) (time.Time, bool) {
+	return func(agent string) (time.Time, bool) {
+		pem, err := os.ReadFile(filepath.Join(certsDir, "agents", agent, "bundle.pem"))
+		if err != nil {
+			return time.Time{}, false
+		}
+		b, err := pki.ParseBundle(pem)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return b.Cert.NotAfter, true
+	}
+}
+
+// handleCertEvents logs every PKI event and turns the agent-facing ones into
+// notifications. The hub's own client-cert renewal (Name=="") stays log-only:
+// agents verify the CA chain, not the specific cert, so no operator action is
+// needed.
+func handleCertEvents(ctx context.Context, events []pki.Event, n *notify.Notifier) {
+	for _, e := range events {
+		logEvent(e)
+		switch e.Kind {
+		case pki.Renewed:
+			if e.Name != "" {
+				n.NotifyBundleRenewed(ctx, e.Name)
+			}
+		case pki.RemintedSAN:
+			n.NotifyBundleRemintedSAN(ctx, e.Name)
+		case pki.CAKeyMissing:
+			n.NotifyCAKeyMissing(ctx, e.Detail)
+		}
 	}
 }
 
