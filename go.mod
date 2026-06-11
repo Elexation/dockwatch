@@ -10,6 +10,7 @@ require (
 	github.com/moby/moby/api v1.54.2
 	github.com/moby/moby/client v0.4.1
 	go.etcd.io/bbolt v1.4.3
+	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.55.0
 )
 
@@ -37,5 +38,5 @@ require (
 	go.opentelemetry.io/otel/metric v1.41.0 // indirect
 	go.opentelemetry.io/otel/trace v1.41.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 )

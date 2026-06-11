@@ -25,6 +25,8 @@ var (
 	bucketChecks   = []byte("checks")
 	bucketAgents   = []byte("agents")
 	bucketNotified = []byte("notified")
+	bucketAuth     = []byte("auth")
+	bucketSessions = []byte("sessions")
 )
 
 type Store struct {
@@ -42,7 +44,7 @@ func Open(dir string) (*Store, error) {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketChecks, bucketAgents, bucketNotified} {
+		for _, b := range [][]byte{bucketChecks, bucketAgents, bucketNotified, bucketAuth, bucketSessions} {
 			if _, berr := tx.CreateBucketIfNotExists(b); berr != nil {
 				return berr
 			}
