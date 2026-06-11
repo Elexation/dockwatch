@@ -1,0 +1,225 @@
+html, body { margin: 0; padding: 0; }
+
+.dw-root {
+  --bg: oklch(0.185 0.015 245);
+  --surface: oklch(0.225 0.016 245);
+  --surface-2: oklch(0.26 0.017 245);
+  --text: oklch(0.93 0.006 240);
+  --text-2: oklch(0.7 0.012 240);
+  --text-3: oklch(0.6 0.014 240);
+  --line: oklch(0.31 0.018 245);
+  --focus: oklch(0.75 0.12 250);
+  --ok: oklch(0.74 0.13 155);
+  --warn: oklch(0.78 0.13 80);
+  --bad: oklch(0.68 0.16 25);
+  --warn-bg: oklch(0.28 0.03 80);
+  --bad-bg: oklch(0.27 0.04 25);
+  --accent: oklch(0.8 0.11 195);
+  --on-accent: oklch(0.16 0.02 245);
+  --accent-text: oklch(0.8 0.11 195);
+  --row-pad-y: 12px;
+  --row-pad-x: 18px;
+  --cname-size: 14px;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.45;
+  min-height: 100vh;
+}
+.dw-root[data-density="compact"] {
+  --row-pad-y: 6px;
+  --row-pad-x: 14px;
+  --cname-size: 13px;
+  font-size: 12.5px;
+}
+.dw-root[data-theme="light"] {
+  --bg: oklch(0.962 0.008 245);
+  --surface: oklch(0.99 0.004 245);
+  --surface-2: oklch(0.93 0.01 245);
+  --text: oklch(0.25 0.018 250);
+  --text-2: oklch(0.46 0.016 250);
+  --text-3: oklch(0.52 0.014 250);
+  --line: oklch(0.89 0.012 245);
+  --ok: oklch(0.55 0.13 155);
+  --warn: oklch(0.58 0.12 75);
+  --bad: oklch(0.54 0.17 25);
+  --warn-bg: oklch(0.95 0.035 80);
+  --bad-bg: oklch(0.94 0.03 25);
+  --accent: oklch(0.5 0.1 195);
+  --on-accent: #fff;
+  --accent-text: oklch(0.45 0.1 195);
+}
+
+@media (prefers-color-scheme: light) {
+  .dw-root[data-theme="auto"] {
+    --bg: oklch(0.962 0.008 245);
+    --surface: oklch(0.99 0.004 245);
+    --surface-2: oklch(0.93 0.01 245);
+    --text: oklch(0.25 0.018 250);
+    --text-2: oklch(0.46 0.016 250);
+    --text-3: oklch(0.52 0.014 250);
+    --line: oklch(0.89 0.012 245);
+    --ok: oklch(0.55 0.13 155);
+    --warn: oklch(0.58 0.12 75);
+    --bad: oklch(0.54 0.17 25);
+    --warn-bg: oklch(0.95 0.035 80);
+    --bad-bg: oklch(0.94 0.03 25);
+    --accent: oklch(0.5 0.1 195);
+    --on-accent: #fff;
+    --accent-text: oklch(0.45 0.1 195);
+  }
+}
+.dw-root * { box-sizing: border-box; }
+.dw-root .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.dw-root :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+
+/* header */
+.dw-top { display: flex; align-items: center; gap: 22px; padding: 0 28px; height: 58px; border-bottom: 1px solid var(--line); }
+.dw-mark { display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: 15px; color: var(--text); text-decoration: none; }
+.dw-glyph { width: 18px; height: 18px; border: 2px solid var(--accent); border-radius: 50%; position: relative; flex: none; }
+.dw-glyph::after { content: ""; position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.dw-nav { display: flex; gap: 6px; }
+.dw-nav a { color: var(--text-2); text-decoration: none; padding: 6px 12px; border-radius: 6px; }
+.dw-nav a:hover { color: var(--text); }
+.dw-nav a[aria-current="page"] { color: var(--text); background: var(--surface-2); font-weight: 600; }
+.dw-top-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.dw-cycle { color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
+.dw-themectl { font: inherit; font-size: 12px; color: var(--text-3); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 20px 5px 7px; min-height: 34px; cursor: pointer; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%); background-position: calc(100% - 11px) 55%, calc(100% - 7px) 55%; background-size: 4px 4px; background-repeat: no-repeat; }
+.dw-themectl:hover { border-color: var(--line); color: var(--text-2); }
+.dw-themectl option { background: var(--surface); color: var(--text); }
+
+.dw-check { display: inline-flex; align-items: center; gap: 8px; font: inherit; font-weight: 650; color: var(--on-accent); background: var(--accent); border: none; border-radius: 7px; padding: 8px 16px; cursor: pointer; white-space: nowrap; min-height: 36px; }
+.dw-check:hover:not(:disabled) { filter: brightness(1.06); }
+.dw-check:disabled { opacity: 0.65; cursor: default; }
+.dw-spin { width: 13px; height: 13px; border: 2px solid var(--on-accent); border-top-color: transparent; border-radius: 50%; flex: none; animation: dw-rot 0.8s linear infinite; }
+@keyframes dw-rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dw-spin { animation: none; opacity: 0.5; } }
+
+/* notifications notice */
+.dw-notice { display: flex; align-items: center; gap: 9px; margin: 16px 28px 0; padding: 9px 14px; font-size: 12.5px; color: var(--text-2); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.dw-notice .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
+.dw-notice b { color: var(--text); font-weight: 600; }
+
+/* toolbar */
+.dw-toolbar { display: flex; align-items: center; gap: 8px; padding: 16px 28px 14px; flex-wrap: wrap; }
+.dw-field { display: inline-flex; align-items: center; gap: 7px; }
+.dw-field > label { font-size: 12px; color: var(--text-3); }
+.dw-select { font: inherit; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 6px 28px 6px 10px; min-height: 34px; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%); background-position: calc(100% - 14px) 55%, calc(100% - 10px) 55%; background-size: 4px 4px; background-repeat: no-repeat; cursor: pointer; }
+.dw-count { margin-left: auto; color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
+.dw-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.dw-seg button { font: inherit; font-size: 12.5px; color: var(--text-2); background: var(--surface); border: none; padding: 6px 12px; min-height: 34px; cursor: pointer; }
+.dw-seg button + button { border-left: 1px solid var(--line); }
+.dw-seg button.on { color: var(--text); background: var(--surface-2); font-weight: 600; }
+.dw-seg button:focus-visible { outline-offset: -2px; border-radius: 0; }
+
+/* grouped/flat view toggle: render both, show one. */
+.dw-layouts[data-layout="grouped"] .dw-flatwrap { display: none; }
+.dw-layouts[data-layout="flat"] .dw-groupedwrap { display: none; }
+
+/* groups & rows */
+.dw-main { padding-bottom: 28px; }
+.dw-group { margin: 0 28px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.dw-ghead { display: flex; align-items: baseline; gap: 10px; padding: 11px var(--row-pad-x); background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.dw-ghead .hname { font-weight: 700; font-size: 13px; letter-spacing: 0.02em; }
+.dw-ghead .hmeta { color: var(--text-3); font-size: 12px; }
+.dw-ghead .hup { margin-left: auto; color: var(--accent); font-size: 12px; font-weight: 600; white-space: nowrap; }
+
+.dw-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 300px) 120px 80px; gap: 16px; align-items: center; padding: var(--row-pad-y) var(--row-pad-x); border-bottom: 1px solid var(--line); }
+.dw-row.flat { grid-template-columns: 76px minmax(200px, 1fr) minmax(230px, 280px) 104px 80px; }
+.dw-row:last-child { border-bottom: none; }
+.dw-row:hover { background: color-mix(in oklab, var(--surface-2) 55%, var(--surface)); }
+.dw-host { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--text-2); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; justify-self: start; }
+.dw-cname { font-weight: 600; font-size: var(--cname-size); }
+.dw-cimg { font-size: 11.5px; color: var(--text-3); margin-top: 2px; overflow-wrap: break-word; }
+.dw-root[data-density="compact"] .dw-cimg { margin-top: 0; }
+
+.dw-ver { font-size: 13px; }
+.dw-ver .arrow { color: var(--text-3); padding: 0 4px; }
+.dw-ver .to { font-weight: 700; color: var(--accent-text); }
+.dw-bump { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 4px; padding: 2px 6px; margin-left: 8px; }
+.dw-bump.major { color: var(--bad); border: 1px solid var(--bad); background: var(--bad-bg); }
+.dw-bump.minor { color: var(--warn); border: 1px solid var(--warn); background: var(--warn-bg); }
+.dw-bump.patch { color: var(--ok); border: 1px solid var(--ok); }
+.dw-mut { color: var(--text-3); }
+.dw-repub { color: var(--warn); font-weight: 600; }
+.dw-checking { color: var(--accent-text); font-style: italic; }
+
+.dw-health { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); justify-self: start; }
+.dw-health .hd { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dw-health.healthy .hd { background: var(--ok); }
+.dw-health.unhealthy .hd { background: var(--bad); }
+.dw-health.starting .hd { background: var(--warn); }
+.dw-health.none { color: var(--text-3); }
+.dw-time { color: var(--text-3); font-size: 12.5px; text-align: right; white-space: nowrap; }
+.dw-mobilefoot { display: none; }
+
+.dw-empty { margin: 48px 28px; text-align: center; color: var(--text-3); }
+.dw-empty .big { font-size: 15px; color: var(--text-2); font-weight: 600; margin-bottom: 6px; }
+
+/* auth screens */
+.dw-authwrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.dw-authcard { width: 100%; max-width: 360px; }
+.dw-authmark { display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 650; font-size: 18px; margin-bottom: 6px; }
+.dw-authsub { text-align: center; color: var(--text-3); font-size: 12.5px; margin-bottom: 24px; }
+.dw-authbox { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; display: grid; gap: 14px; }
+.dw-authbox h1 { font-size: 15px; font-weight: 650; margin: 0 0 2px; }
+.dw-flabel { display: grid; gap: 5px; font-size: 12.5px; color: var(--text-2); font-weight: 550; }
+.dw-input { font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 9px 12px; min-height: 40px; width: 100%; }
+.dw-input:focus { border-color: var(--focus); outline: none; }
+.dw-input[aria-invalid="true"] { border-color: var(--bad); }
+.dw-ferr { color: var(--bad); font-size: 12px; font-weight: 500; }
+.dw-formerr { display: flex; gap: 8px; align-items: center; color: var(--bad); background: var(--bad-bg); border: 1px solid var(--bad); border-radius: 7px; padding: 8px 12px; font-size: 12.5px; }
+.dw-submit { font: inherit; font-weight: 650; color: var(--on-accent); background: var(--accent); border: none; border-radius: 7px; padding: 10px 16px; min-height: 44px; cursor: pointer; margin-top: 4px; }
+.dw-submit:hover { filter: brightness(1.06); }
+.dw-authfoot { text-align: center; color: var(--text-3); font-size: 11.5px; margin-top: 16px; }
+
+/* agents */
+.dw-agents { display: grid; gap: 14px; margin: 4px 28px 28px; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
+.dw-agent { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; }
+.dw-agent .ahead { display: flex; align-items: center; gap: 10px; }
+.dw-agent .aname { font-weight: 700; font-size: 14px; }
+.dw-reach { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 3px 10px; margin-left: auto; white-space: nowrap; }
+.dw-reach .rd { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dw-reach.ok { color: var(--ok); border: 1px solid var(--ok); }
+.dw-reach.ok .rd { background: var(--ok); }
+.dw-reach.down { color: var(--bad); border: 1px solid var(--bad); background: var(--bad-bg); }
+.dw-reach.down .rd { background: var(--bad); }
+.dw-reach.nodocker { color: var(--warn); border: 1px solid var(--warn); background: var(--warn-bg); }
+.dw-reach.nodocker .rd { background: var(--warn); }
+.dw-agent .arow { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; font-size: 12.5px; }
+.dw-agent .arow .al { color: var(--text-3); flex: none; }
+.dw-agent .arow .av { color: var(--text-2); text-align: right; }
+.dw-aflag { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; border-radius: 7px; padding: 7px 10px; }
+.dw-aflag.warn { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn); }
+.dw-aflag .fdot { margin-top: 4px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+
+.dw-pagehead { display: flex; align-items: baseline; gap: 12px; padding: 20px 28px 14px; }
+.dw-pagehead h1 { font-size: 16px; font-weight: 700; margin: 0; }
+.dw-pagehead .sub { color: var(--text-3); font-size: 12.5px; }
+
+/* responsive: the app is the viewport, so these track the window width. */
+@media (max-width: 760px) {
+  .dw-top { padding: 0 14px; gap: 8px; height: 56px; }
+  .dw-mark { font-size: 14px; gap: 7px; }
+  .dw-nav { gap: 2px; }
+  .dw-nav a { padding: 9px 9px; }
+  .dw-check { padding: 8px 12px; min-height: 44px; }
+  .dw-select { min-height: 44px; }
+  .dw-seg button { min-height: 44px; }
+  .dw-input { min-height: 44px; }
+  .dw-cycle.intop { display: none; }
+  .dw-notice { margin: 12px 14px 0; }
+  .dw-toolbar { padding: 14px 14px 12px; }
+  .dw-count { width: 100%; margin-left: 0; }
+  .dw-group { margin: 0 14px 14px; }
+  .dw-pagehead { padding: 16px 14px 10px; }
+  .dw-agents { margin: 4px 14px 20px; grid-template-columns: 1fr; }
+  .dw-row, .dw-row.flat { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 11px 14px; }
+  .dw-row.flat .dw-host { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; }
+  .dw-row .dw-ver { grid-column: 1 / -1; }
+  .dw-cell-health, .dw-cell-time { display: none; }
+  .dw-mobilefoot { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
+  .dw-mobilefoot .dw-time { margin-left: auto; }
+}

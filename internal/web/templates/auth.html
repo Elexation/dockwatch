@@ -1,0 +1,41 @@
+{{define "setup" -}}
+<!DOCTYPE html>
+<html lang="en" class="dw-root" data-theme="{{.Theme}}" data-density="compact">
+<head>{{template "head" "Setup"}}</head>
+<body>
+<div class="dw-authwrap">
+	<div class="dw-authcard">
+		<div class="dw-authmark"><span class="dw-glyph" aria-hidden="true"></span>DockWatch</div>
+		<p class="dw-authsub">First-run setup, create the admin account for this install.</p>
+		<form class="dw-authbox" method="post" action="/setup" novalidate>
+			<h1>Create account</h1>
+			{{range .Fields}}{{template "field" .}}{{end}}
+			<button class="dw-submit" type="submit">Create account</button>
+		</form>
+		<p class="dw-authfoot">This screen only appears once, while no account exists yet.</p>
+	</div>
+</div>
+</body>
+</html>
+{{- end}}
+
+{{define "login" -}}
+<!DOCTYPE html>
+<html lang="en" class="dw-root" data-theme="{{.Theme}}" data-density="compact">
+<head>{{template "head" "Sign in"}}</head>
+<body>
+<div class="dw-authwrap">
+	<div class="dw-authcard">
+		<div class="dw-authmark"><span class="dw-glyph" aria-hidden="true"></span>DockWatch</div>
+		<p class="dw-authsub">Sign in to your DockWatch instance.</p>
+		<form class="dw-authbox" method="post" action="/login" novalidate>
+			<h1>Sign in</h1>
+			{{if .Banner}}<div class="dw-formerr" role="alert">{{.Banner}}</div>{{end}}
+			{{range .Fields}}{{template "field" .}}{{end}}
+			<button class="dw-submit" type="submit">Sign in</button>
+		</form>
+	</div>
+</div>
+</body>
+</html>
+{{- end}}

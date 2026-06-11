@@ -1,0 +1,139 @@
+{{define "head" -}}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DockWatch · {{.}}</title>
+<link rel="stylesheet" href="/static/dw-harbor.css">
+{{- end}}
+
+{{define "appjs" -}}
+<script src="/static/app.js" defer></script>
+{{- end}}
+
+{{define "header" -}}
+<header class="dw-top">
+	<a class="dw-mark" href="/"><span class="dw-glyph" aria-hidden="true"></span>DockWatch</a>
+	<nav class="dw-nav" aria-label="Main">
+		<a href="/"{{if eq .Active "dashboard"}} aria-current="page"{{end}}>Dashboard</a>
+		<a href="/agents"{{if eq .Active "agents"}} aria-current="page"{{end}}>Agents</a>
+	</nav>
+	<div class="dw-top-right">
+		<span class="dw-cycle intop">last cycle: {{with reltime .LastCycle}}{{.}}{{else}}-{{end}}</span>
+		<select class="dw-themectl" aria-label="Theme" data-dw-theme>
+			<option value="auto"{{if eq .Theme "auto"}} selected{{end}}>theme: auto</option>
+			<option value="light"{{if eq .Theme "light"}} selected{{end}}>theme: light</option>
+			<option value="dark"{{if eq .Theme "dark"}} selected{{end}}>theme: dark</option>
+		</select>
+		<button class="dw-check" type="button" data-dw-check>Check now</button>
+	</div>
+</header>
+{{- end}}
+
+{{define "notice" -}}
+<div class="dw-notice" role="status">
+	<span class="dot" aria-hidden="true"></span>
+	<span><b>Notifications disabled.</b> Set a notification topic to get update alerts.</span>
+</div>
+{{- end}}
+
+{{define "toolbar" -}}
+<div class="dw-toolbar">
+	<span class="dw-field">
+		<label for="dw-fhost">Host</label>
+		<select class="dw-select" id="dw-fhost" data-dw-host>
+			<option value="all">All hosts</option>
+			{{range .Hosts}}<option value="{{.}}">{{.}}</option>{{end}}
+		</select>
+	</span>
+	<span class="dw-field">
+		<label for="dw-fstatus">Status</label>
+		<select class="dw-select" id="dw-fstatus" data-dw-status>
+			<option value="all">All statuses</option>
+			<option value="update">Update available</option>
+			<option value="current">Current</option>
+			<option value="notcheckable">Not checkable</option>
+		</select>
+	</span>
+	<span class="dw-field" role="group" aria-label="List view">
+		<label id="dw-viewlabel">View</label>
+		<span class="dw-seg" aria-labelledby="dw-viewlabel" data-dw-seg>
+			<button type="button" class="{{if ne .Chrome.Layout "flat"}}on{{end}}" aria-pressed="{{if ne .Chrome.Layout "flat"}}true{{else}}false{{end}}" data-dw-layout="grouped">grouped</button>
+			<button type="button" class="{{if eq .Chrome.Layout "flat"}}on{{end}}" aria-pressed="{{if eq .Chrome.Layout "flat"}}true{{else}}false{{end}}" data-dw-layout="flat">flat</button>
+		</span>
+	</span>
+	{{if not .Empty}}<span class="dw-count">{{.Summary}}</span>{{end}}
+</div>
+{{- end}}
+
+{{define "group" -}}
+<section class="dw-group" aria-label="Host {{.Host}}">
+	<div class="dw-ghead">
+		<span class="hname">{{.Host}}</span>
+		<span class="hmeta">{{.Count}} container{{if ne .Count 1}}s{{end}}</span>
+		{{if gt .Updates 0}}<span class="hup">{{.Updates}} update{{if gt .Updates 1}}s{{end}}</span>{{end}}
+	</div>
+	{{range .Rows}}{{template "row" (dict "R" . "Flat" false)}}{{end}}
+</section>
+{{- end}}
+
+{{define "row" -}}
+{{$r := .R -}}
+<div class="dw-row{{if .Flat}} flat{{end}}">
+	{{if .Flat}}<span class="dw-host">{{$r.Host}}</span>{{end}}
+	<div>
+		<div class="dw-cname">{{$r.Name}}</div>
+		<div class="dw-cimg mono">{{wbrImageRef $r.Image}}</div>
+	</div>
+	{{template "versioncell" $r}}
+	<span class="dw-cell-health">{{template "healthbadge" $r.Health}}</span>
+	<span class="dw-time dw-cell-time">{{with reltime $r.Checked}}{{.}}{{else}}-{{end}}</span>
+	<div class="dw-mobilefoot">
+		{{template "healthbadge" $r.Health}}
+		<span class="dw-time">{{with reltime $r.Checked}}{{.}}{{else}}-{{end}}</span>
+	</div>
+</div>
+{{- end}}
+
+{{define "versioncell" -}}
+{{if eq .State "update" -}}
+<span class="dw-ver mono">{{.From}}<span class="arrow" aria-hidden="true">→</span><span class="to">{{.To}}</span>{{if .Bump}}<span class="dw-bump {{.Bump}}">{{.Bump}}</span>{{end}}</span>
+{{- else if eq .State "republished" -}}
+<span class="dw-ver dw-repub">republished{{with reltime .RepublishedAt}} {{.}}{{end}}</span>
+{{- else if eq .State "current" -}}
+<span class="dw-ver dw-mut">up to date</span>
+{{- else if eq .State "local" -}}
+<span class="dw-ver dw-mut">local, not checkable</span>
+{{- else if eq .State "auth" -}}
+<span class="dw-ver dw-mut">auth required, not checkable</span>
+{{- else if eq .State "rate" -}}
+<span class="dw-ver dw-mut">check delayed (rate limited)</span>
+{{- else -}}
+<span class="dw-ver dw-mut">not checked yet</span>
+{{- end}}
+{{- end}}
+
+{{define "healthbadge" -}}
+{{if or (eq . "healthy") (eq . "unhealthy") (eq . "starting") -}}
+<span class="dw-health {{.}}"><span class="hd" aria-hidden="true"></span>{{.}}</span>
+{{- else -}}
+<span class="dw-health none" title="No health check configured">-</span>
+{{- end}}
+{{- end}}
+
+{{define "agentcard" -}}
+<article class="dw-agent">
+	<div class="ahead">
+		<span class="aname">{{.Name}}</span>
+		<span class="dw-reach {{.ReachClass}}"><span class="rd" aria-hidden="true"></span>{{.ReachLabel}}</span>
+	</div>
+	<div class="arow"><span class="al">Last successful poll</span><span class="av">{{with reltime .LastPoll}}{{.}}{{else}}-{{end}}</span></div>
+	<div class="arow"><span class="al">Certificate</span><span class="av mono">{{expiryDate .CertNotAfter}}</span></div>
+	{{range .Flags}}<div class="dw-aflag warn"><span class="fdot" aria-hidden="true"></span><span>{{.}}</span></div>{{end}}
+</article>
+{{- end}}
+
+{{define "field" -}}
+<label class="dw-flabel">{{.Label}}
+	<input class="dw-input" type="{{.Type}}" name="{{.Name}}" id="{{.ID}}" autocomplete="{{.Autocomplete}}" value="{{.Value}}"{{if .Error}} aria-invalid="true" aria-describedby="{{.ID}}-err"{{end}}>
+	{{if .Error}}<span class="dw-ferr" id="{{.ID}}-err">{{.Error}}</span>{{end}}
+</label>
+{{- end}}

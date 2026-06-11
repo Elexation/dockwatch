@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" class="dw-root" data-theme="{{.Chrome.Theme}}" data-density="compact">
+<head>{{template "head" "Dashboard"}}</head>
+<body>
+{{template "header" .Chrome}}
+{{if .Chrome.NotificationsOff}}{{template "notice"}}{{end}}
+<main class="dw-main">
+{{template "toolbar" .}}
+{{if .Empty}}
+<div class="dw-empty">
+	<div class="big">No containers found</div>
+	<div>{{.EmptyMsg}}</div>
+</div>
+{{else}}
+<div class="dw-layouts" data-layout="{{.Chrome.Layout}}" data-dw-layouts>
+	<div class="dw-groupedwrap">
+		{{range .Groups}}{{template "group" .}}{{end}}
+	</div>
+	<div class="dw-flatwrap">
+		<section class="dw-group" aria-label="All containers">
+			{{range .FlatRows}}{{template "row" (dict "R" . "Flat" true)}}{{end}}
+		</section>
+	</div>
+</div>
+{{end}}
+</main>
+{{template "appjs"}}
+</body>
+</html>
