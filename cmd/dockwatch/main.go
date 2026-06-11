@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -41,7 +43,7 @@ func main() {
 	case "version":
 		fmt.Printf("dockwatch %s (commit %s, built %s)\n", version, commit, date)
 	case "health":
-		os.Exit(0)
+		health()
 	case "run":
 		run()
 	default:
@@ -71,6 +73,43 @@ func run() {
 		runHub(cfg)
 	case "agent":
 		runAgent(cfg)
+	}
+}
+
+// health is the container HEALTHCHECK command (SPEC 15): it confirms this process
+// is serving and exits 0 on success, non-zero otherwise. The hub pings its own
+// /healthz over loopback; the agent, which exposes only an mTLS route, is probed
+// by a bare TCP connect to its listener.
+func health() {
+	cfg, _, err := config.Load(os.Environ())
+	if err != nil {
+		os.Exit(1)
+	}
+
+	if cfg.IsAgent() {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.Port), 5*time.Second)
+		if err != nil {
+			os.Exit(1)
+		}
+		conn.Close()
+		return
+	}
+
+	scheme := "http"
+	client := &http.Client{Timeout: 5 * time.Second}
+	if cfg.HTTPS {
+		scheme = "https"
+		// Loopback self-probe of our own (often self-signed) UI cert; it carries no
+		// secret and reads no body, so chain verification adds nothing here.
+		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	}
+	resp, err := client.Get(fmt.Sprintf("%s://127.0.0.1:%d/healthz", scheme, cfg.Port))
+	if err != nil {
+		os.Exit(1)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		os.Exit(1)
 	}
 }
 
@@ -158,7 +197,7 @@ func runHub(cfg *config.Config) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Web UI over plain HTTP; TLS is layered on separately.
+	// Web UI: plain HTTP, or TLS behind a port-sharing redirect listener (SPEC 12).
 	renderer, err := web.NewRenderer()
 	if err != nil {
 		slog.Error("init web renderer", "err", err)
@@ -177,26 +216,19 @@ func runHub(cfg *config.Config) {
 		LocalName:        cfg.LocalName,
 		NotificationsOff: cfg.NtfyTopic == "",
 		SecureCookie:     cfg.HTTPS || cfg.TrustedProxy,
+		Port:             cfg.Port,
+		HTTPS:            cfg.HTTPS,
+		TLSCert:          cfg.TLSCert,
+		TLSKey:           cfg.TLSKey,
+		CertsDir:         cfg.CertsDir,
+		Domain:           cfg.Domain,
+		TrustedProxy:     cfg.TrustedProxy,
 	})
-	httpSrv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           webSrv.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	go func() {
-		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := httpSrv.Shutdown(shutCtx); err != nil {
-			slog.Error("web server shutdown", "err", err)
-		}
-	}()
 	serveErr := make(chan error, 1)
 	go func() {
-		slog.Info("web UI listening", "addr", httpSrv.Addr)
-		err := httpSrv.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
-			stop() // a bind failure brings the whole hub down
+		err := webSrv.Serve(ctx)
+		if err != nil {
+			stop() // a bind or serve failure brings the whole hub down
 		}
 		serveErr <- err
 	}()
@@ -204,7 +236,7 @@ func runHub(cfg *config.Config) {
 	slog.Info("hub running", "interval", cfg.Interval, "agents", len(agents))
 	sched.Run(ctx)
 
-	if err := <-serveErr; err != nil && err != http.ErrServerClosed {
+	if err := <-serveErr; err != nil {
 		slog.Error("web server failed", "err", err)
 		os.Exit(1)
 	}

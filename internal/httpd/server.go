@@ -1,5 +1,6 @@
-// Package httpd serves the hub's session-gated web UI over plain HTTP: routing,
-// the session gate, and the setup/login/logout flows. TLS is layered on separately.
+// Package httpd serves the hub's session-gated web UI: routing, the session gate,
+// the setup/login/logout flows, and the HTTP/TLS transport (plain HTTP, or TLS
+// behind a port-sharing listener that redirects plaintext requests to https).
 package httpd
 
 import (
@@ -30,11 +31,21 @@ type Config struct {
 	Store            *store.Store
 	Local            LocalReader
 	StaticFS         fs.FS
-	LocalName        string        // display name for the hub's own host
-	NotificationsOff bool          // DW_NTFY_TOPIC unset
-	SecureCookie     bool          // DW_HTTPS or DW_TRUSTED_PROXY
-	SessionTTL       time.Duration // zero means defaultTTL
-	Now              func() time.Time
+	LocalName        string // display name for the hub's own host
+	NotificationsOff bool   // DW_NTFY_TOPIC unset
+	SecureCookie     bool   // DW_HTTPS or DW_TRUSTED_PROXY
+
+	// Transport (SPEC 12), consumed by Serve.
+	Port         int    // listen port
+	HTTPS        bool   // DW_HTTPS: serve TLS behind the port-sharing redirect listener
+	TLSCert      string // DW_TLS_CERT; empty pairs with TLSKey to mean self-signed
+	TLSKey       string // DW_TLS_KEY
+	CertsDir     string // DW_CERTS; a self-signed UI cert lives under <CertsDir>/ui
+	Domain       string // DW_DOMAIN: canonical host for the https redirect
+	TrustedProxy bool   // DW_TRUSTED_PROXY: drops the port from the redirect target
+
+	SessionTTL time.Duration // zero means defaultTTL
+	Now        func() time.Time
 }
 
 // Server is the hub's web UI handler.
@@ -70,6 +81,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /setup", s.setupForm)
 	mux.HandleFunc("POST /setup", s.setupSubmit)
 	mux.HandleFunc("POST /logout", s.logout)
+	mux.HandleFunc("GET /healthz", s.healthz)
 	if s.cfg.StaticFS != nil {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(s.cfg.StaticFS)))
 	}

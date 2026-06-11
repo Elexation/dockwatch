@@ -129,15 +129,23 @@ func Load(environ []string) (*Config, []string, error) {
 		NtfyTopic: env["DW_NTFY_TOPIC"],
 		NtfyToken: env["DW_NTFY_TOKEN"],
 
-		HTTPS: https,
-		// DW_TLS_CERT/DW_TLS_KEY both-or-neither cross-check is deferred to the
-		// web transport, where the listener that consumes them is built.
+		HTTPS:        https,
 		TLSCert:      env["DW_TLS_CERT"],
 		TLSKey:       env["DW_TLS_KEY"],
 		Domain:       domain,
 		TrustedProxy: trustedProxy,
 		RequireHTTPS: requireHTTPS,
 		ResetAdmin:   resetAdmin,
+	}
+
+	// Transport cross-checks (SPEC 12); hub-only, as the agent ignores that section.
+	if cfg.IsHub() {
+		if (cfg.TLSCert == "") != (cfg.TLSKey == "") {
+			return nil, nil, fmt.Errorf("DW_TLS_CERT and DW_TLS_KEY must both be set or both be unset")
+		}
+		if cfg.RequireHTTPS && !cfg.HTTPS && !cfg.TrustedProxy {
+			return nil, nil, fmt.Errorf("DW_REQUIRE_HTTPS=true requires DW_HTTPS=true or DW_TRUSTED_PROXY=true")
+		}
 	}
 
 	return cfg, warnings(env, cfg), nil
