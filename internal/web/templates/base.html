@@ -24,6 +24,7 @@
 			<option value="dark"{{if eq .Theme "dark"}} selected{{end}}>theme: dark</option>
 		</select>
 		<button class="dw-check" type="button" data-dw-check>Check now</button>
+		<form class="dw-logout" method="post" action="/logout"><button class="dw-signout" type="submit">Sign out</button></form>
 	</div>
 </header>
 {{- end}}

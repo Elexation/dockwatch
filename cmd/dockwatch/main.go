@@ -14,12 +14,14 @@ import (
 
 	"github.com/elexation/dockwatch/internal/agentserver"
 	"github.com/elexation/dockwatch/internal/config"
+	"github.com/elexation/dockwatch/internal/httpd"
 	"github.com/elexation/dockwatch/internal/hub"
 	"github.com/elexation/dockwatch/internal/inventory"
 	"github.com/elexation/dockwatch/internal/notify"
 	"github.com/elexation/dockwatch/internal/pki"
 	"github.com/elexation/dockwatch/internal/registry"
 	"github.com/elexation/dockwatch/internal/store"
+	"github.com/elexation/dockwatch/internal/web"
 )
 
 // Overridden via -ldflags at build time.
@@ -94,6 +96,19 @@ func runHub(cfg *config.Config) {
 	}
 	defer st.Close()
 
+	// DW_RESET_ADMIN: wipe the admin and all sessions, re-arming first-run setup.
+	if cfg.ResetAdmin {
+		slog.Warn("DW_RESET_ADMIN set: wiping admin account and all sessions; re-run first-run setup promptly")
+		if err := st.DeleteAdmin(); err != nil {
+			slog.Error("reset admin", "err", err)
+			os.Exit(1)
+		}
+		if err := st.ClearSessions(); err != nil {
+			slog.Error("clear sessions", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// Build the notifier before Bootstrap so a startup cert renewal/remint can
 	// notify. It no-ops when DW_NTFY_TOPIC is unset, so building it is always safe.
 	ntfy := notify.NewClient(cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, nil)
@@ -143,8 +158,56 @@ func runHub(cfg *config.Config) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Web UI over plain HTTP; TLS is layered on separately.
+	renderer, err := web.NewRenderer()
+	if err != nil {
+		slog.Error("init web renderer", "err", err)
+		os.Exit(1)
+	}
+	staticFS, err := web.StaticFS()
+	if err != nil {
+		slog.Error("init web static assets", "err", err)
+		os.Exit(1)
+	}
+	webSrv := httpd.New(httpd.Config{
+		Renderer:         renderer,
+		Store:            st,
+		Local:            local,
+		StaticFS:         staticFS,
+		LocalName:        cfg.LocalName,
+		NotificationsOff: cfg.NtfyTopic == "",
+		SecureCookie:     cfg.HTTPS || cfg.TrustedProxy,
+	})
+	httpSrv := &http.Server{
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           webSrv.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutCtx); err != nil {
+			slog.Error("web server shutdown", "err", err)
+		}
+	}()
+	serveErr := make(chan error, 1)
+	go func() {
+		slog.Info("web UI listening", "addr", httpSrv.Addr)
+		err := httpSrv.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
+			stop() // a bind failure brings the whole hub down
+		}
+		serveErr <- err
+	}()
+
 	slog.Info("hub running", "interval", cfg.Interval, "agents", len(agents))
 	sched.Run(ctx)
+
+	if err := <-serveErr; err != nil && err != http.ErrServerClosed {
+		slog.Error("web server failed", "err", err)
+		os.Exit(1)
+	}
 }
 
 func runAgent(cfg *config.Config) {
