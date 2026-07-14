@@ -48,6 +48,9 @@ func TestDeriveState(t *testing.T) {
 		{"current-semver", running("x", "x:1", "x@sha256:a", ""), store.CheckResult{Kind: "SEMVER", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateCurrent},
 		{"republished", running("x", "x:stable", "x@sha256:old", ""), store.CheckResult{Ref: "x:stable", Kind: "DIGEST", RegistryDigest: "sha256:new", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateRepublished},
 		{"current-digest", running("x", "x:stable", "x@sha256:new", ""), store.CheckResult{Ref: "x:stable", Kind: "DIGEST", RegistryDigest: "sha256:new", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateCurrent},
+		{"semver-republished", running("x", "x:1.2.3", "x@sha256:old", ""), store.CheckResult{Ref: "x:1.2.3", Kind: "SEMVER", RegistryDigest: "sha256:new", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateRepublished},
+		{"semver-update-beats-republish", running("x", "x:1.2.3", "x@sha256:old", ""), store.CheckResult{Ref: "x:1.2.3", Kind: "SEMVER", Latest: "1.3.0", RegistryDigest: "sha256:new", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateUpdate},
+		{"semver-current-same-digest", running("x", "x:1.2.3", "x@sha256:idx", ""), store.CheckResult{Ref: "x:1.2.3", Kind: "SEMVER", RegistryDigest: "sha256:idx", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateCurrent},
 		{"local-beats-checked", local("x", "x:dev", ""), store.CheckResult{Kind: "LOCAL", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateLocal},
 	}
 	for _, tc := range cases {
@@ -87,6 +90,25 @@ func TestBuildDashboardGroupsAndSort(t *testing.T) {
 	server := vm.Groups[1]
 	if got := rowNames(server.Rows); !equal(got, []string{"postgres", "traefik", "jellyfin", "uptime-kuma", "nginx-cache", "redis"}) {
 		t.Errorf("server row order: got %v", got)
+	}
+}
+
+func TestBuildDashboardStress(t *testing.T) {
+	invs, checks, in := stressDashboard()
+	vm := BuildDashboard(invs, checks, in)
+	if got := len(vm.FlatRows); got != 55 {
+		t.Errorf("stress rows = %d, want 55", got)
+	}
+	wantSummary := "55 of 55 containers " + string(rune(0x00b7)) + " 14 updates"
+	if vm.Summary != wantSummary {
+		t.Errorf("summary: got %q, want %q", vm.Summary, wantSummary)
+	}
+	wg := findRow(vm.FlatRows, "wg-easy")
+	if wg == nil || wg.State != "republished" {
+		t.Fatalf("wg-easy (SEMVER pinned-tag republish): got %+v, want republished", wg)
+	}
+	if wg.RepublishedAt.IsZero() {
+		t.Error("wg-easy republished date missing")
 	}
 }
 
@@ -161,6 +183,36 @@ func TestRenderDashboard(t *testing.T) {
 		t.Error("watch-gated container leaked into render")
 	}
 	assertNoBannedGlyph(t, "dashboard", out)
+}
+
+func TestRenderDashboardChecking(t *testing.T) {
+	r := testRenderer()
+	invs, checks, in := sampleDashboard()
+	in.Checking = true
+	var buf bytes.Buffer
+	if err := r.RenderDashboard(&buf, BuildDashboard(invs, checks, in)); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	assertContains(t, "checking dashboard", out,
+		"last cycle: running…", "Checking…", "dw-spin", "data-dw-checking", " disabled")
+	assertNoBannedGlyph(t, "checking dashboard", out)
+}
+
+func TestRenderDashboardFilterHooks(t *testing.T) {
+	r := testRenderer()
+	invs, checks, in := sampleDashboard()
+	var buf bytes.Buffer
+	if err := r.RenderDashboard(&buf, BuildDashboard(invs, checks, in)); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	assertContains(t, "filter hooks", out,
+		`data-state="update"`, `data-state="republished"`, `data-host="home"`,
+		"data-dw-noresults", "Nothing matches the current filters.")
+	if strings.Contains(out, "data-dw-checking") {
+		t.Error("idle dashboard rendered the checking button state")
+	}
 }
 
 func TestRenderDashboardEmpty(t *testing.T) {

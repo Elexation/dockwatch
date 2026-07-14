@@ -17,13 +17,13 @@
 		<a href="/agents"{{if eq .Active "agents"}} aria-current="page"{{end}}>Agents</a>
 	</nav>
 	<div class="dw-top-right">
-		<span class="dw-cycle intop">last cycle: {{with reltime .LastCycle}}{{.}}{{else}}-{{end}}</span>
+		<span class="dw-cycle intop">last cycle: {{if .Checking}}running…{{else}}{{with reltime .LastCycle}}{{.}}{{else}}-{{end}}{{end}}</span>
 		<select class="dw-themectl" aria-label="Theme" data-dw-theme>
 			<option value="auto"{{if eq .Theme "auto"}} selected{{end}}>theme: auto</option>
 			<option value="light"{{if eq .Theme "light"}} selected{{end}}>theme: light</option>
 			<option value="dark"{{if eq .Theme "dark"}} selected{{end}}>theme: dark</option>
 		</select>
-		<button class="dw-check" type="button" data-dw-check>Check now</button>
+		<button class="dw-check" type="button" data-dw-check{{if .Checking}} disabled data-dw-checking{{end}}>{{if .Checking}}<span class="dw-spin" aria-hidden="true"></span>Checking…{{else}}Check now{{end}}</button>
 		<form class="dw-logout" method="post" action="/logout"><button class="dw-signout" type="submit">Sign out</button></form>
 	</div>
 </header>
@@ -66,7 +66,7 @@
 {{- end}}
 
 {{define "group" -}}
-<section class="dw-group" aria-label="Host {{.Host}}">
+<section class="dw-group" aria-label="Host {{.Host}}" data-host="{{.Host}}">
 	<div class="dw-ghead">
 		<span class="hname">{{.Host}}</span>
 		<span class="hmeta">{{.Count}} container{{if ne .Count 1}}s{{end}}</span>
@@ -78,7 +78,7 @@
 
 {{define "row" -}}
 {{$r := .R -}}
-<div class="dw-row{{if .Flat}} flat{{end}}">
+<div class="dw-row{{if .Flat}} flat{{end}}" data-host="{{$r.Host}}" data-state="{{$r.State}}">
 	{{if .Flat}}<span class="dw-host">{{$r.Host}}</span>{{end}}
 	<div>
 		<div class="dw-cname">{{$r.Name}}</div>

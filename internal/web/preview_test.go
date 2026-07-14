@@ -34,11 +34,16 @@ func TestWritePreview(t *testing.T) {
 
 	invs, checks, din := sampleDashboard()
 	agents, ain := sampleAgents()
+	sinvs, schecks, sdin := stressDashboard()
+	cdin := din
+	cdin.Checking = true
 	pages := []struct {
 		name   string
 		render func(*bytes.Buffer) error
 	}{
 		{"dashboard", func(b *bytes.Buffer) error { return r.RenderDashboard(b, BuildDashboard(invs, checks, din)) }},
+		{"dashboard-stress", func(b *bytes.Buffer) error { return r.RenderDashboard(b, BuildDashboard(sinvs, schecks, sdin)) }},
+		{"dashboard-checking", func(b *bytes.Buffer) error { return r.RenderDashboard(b, BuildDashboard(invs, checks, cdin)) }},
 		{"agents", func(b *bytes.Buffer) error { return r.RenderAgents(b, BuildAgents(agents, ain)) }},
 		{"setup", func(b *bytes.Buffer) error { return r.RenderSetup(b, setupClean()) }},
 		{"login", func(b *bytes.Buffer) error { return r.RenderLogin(b, loginClean()) }},

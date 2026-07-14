@@ -1,4 +1,5 @@
 html, body { margin: 0; padding: 0; }
+[hidden] { display: none !important; } /* row/group display rules would otherwise beat the hidden attribute */
 
 .dw-root {
   --bg: oklch(0.185 0.015 245);
