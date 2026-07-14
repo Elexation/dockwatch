@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -160,6 +161,45 @@ func TestGatherAgentRecoveryResetsFailures(t *testing.T) {
 	}
 	if !status.DownNotified {
 		t.Error("DownNotified must be carried through (the notifier owns its reset)")
+	}
+}
+
+func TestAgentInventoriesKeepsLastKnown(t *testing.T) {
+	agentInv := inventory.Inventory{
+		V: inventory.WireVersion, Host: "raspberrypi", Docker: inventory.DockerOK,
+		Containers: []inventory.Container{
+			{Name: "gitea", Image: "gitea/gitea:1.24.3", State: "running"},
+		},
+	}
+	var fail atomic.Bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/inventory", func(w http.ResponseWriter, _ *http.Request) {
+		if fail.Load() {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(agentInv)
+	})
+	url, client := mtlsAgent(t, mux)
+	st := openStore(t)
+	p := NewPoller(emptyLocal{}, []Agent{{Name: "home", URL: url}}, client, st, quietLogger())
+
+	if got := p.AgentInventories(); len(got) != 0 {
+		t.Fatalf("before any poll: %d inventories, want 0", len(got))
+	}
+
+	p.Gather(context.Background(), time.Now())
+	snap := p.AgentInventories()
+	if len(snap) != 1 || snap[0].Host != "home" || len(snap[0].Containers) != 1 {
+		t.Fatalf("after success: %+v, want home's inventory with one container", snap)
+	}
+
+	fail.Store(true)
+	p.Gather(context.Background(), time.Now())
+	snap = p.AgentInventories()
+	if len(snap) != 1 || len(snap[0].Containers) != 1 {
+		t.Errorf("after failed poll: %+v, want the last-known inventory retained", snap)
 	}
 }
 

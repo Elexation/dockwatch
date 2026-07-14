@@ -45,6 +45,8 @@ type Scheduler struct {
 
 	doorbell chan struct{} // buffered(1); a non-blocking send is a trigger
 	force    atomic.Bool   // set by Trigger, swapped false at cycle start
+	running  atomic.Bool   // drives the web UI's checking state
+	lastDone atomic.Int64  // unixnano of the last completed cycle; 0 = none yet
 
 	renew    func()           // opaque cert-renewal closure; keeps this package off pki
 	notifier *notify.Notifier // nil for a hub built without notifications
@@ -106,6 +108,20 @@ func (s *Scheduler) Trigger() {
 	}
 }
 
+// Running reports whether a check cycle is in flight.
+func (s *Scheduler) Running() bool { return s.running.Load() }
+
+// LastCycle returns when the most recent cycle completed, zero before the
+// first. It advances even when a cycle persisted nothing, so a waiter can
+// always detect completion.
+func (s *Scheduler) LastCycle() time.Time {
+	n := s.lastDone.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
+}
+
 // Run blocks until ctx is cancelled, firing a cycle on the interval timer or a trigger.
 func (s *Scheduler) Run(ctx context.Context) {
 	if s.renew != nil {
@@ -118,13 +134,20 @@ func (s *Scheduler) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C():
-			s.cycle(ctx, s.force.Swap(false))
+			s.fire(ctx)
 			s.afterCycle(timer)
 		case <-s.doorbell:
-			s.cycle(ctx, s.force.Swap(false))
+			s.fire(ctx)
 			s.afterCycle(timer)
 		}
 	}
+}
+
+func (s *Scheduler) fire(ctx context.Context) {
+	s.running.Store(true)
+	s.cycle(ctx, s.force.Swap(false))
+	s.running.Store(false)
+	s.lastDone.Store(time.Now().UnixNano())
 }
 
 // afterCycle absorbs a trigger that landed during the cycle (no second run) and reschedules the next automatic cycle.

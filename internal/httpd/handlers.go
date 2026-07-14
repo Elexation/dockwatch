@@ -2,6 +2,7 @@ package httpd
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -125,6 +126,35 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
+// --- check now ---
+
+func (s *Server) checkNow(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Trigger == nil {
+		http.Error(w, "manual checks unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	s.cfg.Trigger()
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// checkStatus reports the scheduler's cycle state; app.js polls it after a
+// manual check and reloads once lastCycle advances.
+func (s *Server) checkStatus(w http.ResponseWriter, r *http.Request) {
+	st := struct {
+		Running   bool   `json:"running"`
+		LastCycle string `json:"lastCycle"`
+	}{Running: s.checking()}
+	if s.cfg.LastCycleDone != nil {
+		if t := s.cfg.LastCycleDone(); !t.IsZero() {
+			st.LastCycle = t.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(st); err != nil {
+		slog.Error("write check status", "err", err)
+	}
+}
+
 // --- protected pages ---
 
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -138,12 +168,15 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("read checks", "err", err)
 	}
-	vm := web.BuildDashboard([]inventory.Inventory{inv}, checks, web.DashboardInput{
+	invs := []inventory.Inventory{inv}
+	invs = append(invs, s.agentInventories()...)
+	vm := web.BuildDashboard(invs, checks, web.DashboardInput{
 		LocalName:        s.cfg.LocalName,
 		Theme:            themeFrom(r),
 		Layout:           "grouped",
-		LastCycle:        latestCheck(checks),
+		LastCycle:        s.lastCycle(latestCheck(checks)),
 		NotificationsOff: s.cfg.NotificationsOff,
+		Checking:         s.checking(),
 		RepublishedSince: s.republishedSince(checks),
 	})
 	if err := s.cfg.Renderer.RenderDashboard(w, vm); err != nil {
@@ -156,10 +189,16 @@ func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("read agents", "err", err)
 	}
+	docker := make(map[string]string)
+	for _, inv := range s.agentInventories() {
+		docker[inv.Host] = inv.Docker
+	}
 	vm := web.BuildAgents(agents, web.AgentsInput{
 		Theme:            themeFrom(r),
-		LastCycle:        latestPoll(agents),
+		LastCycle:        s.lastCycle(latestPoll(agents)),
 		NotificationsOff: s.cfg.NotificationsOff,
+		Checking:         s.checking(),
+		DockerStatus:     docker,
 	})
 	if err := s.cfg.Renderer.RenderAgents(w, vm); err != nil {
 		slog.Error("render agents", "err", err)
@@ -177,11 +216,37 @@ func (s *Server) adminExists() bool {
 	return exists
 }
 
-// republishedSince reads each DIGEST republish date from the notified bucket (D18).
+// checking reports whether a check cycle is in flight; false without a scheduler.
+func (s *Server) checking() bool {
+	return s.cfg.CheckRunning != nil && s.cfg.CheckRunning()
+}
+
+// lastCycle prefers the scheduler's completion stamp, which advances even
+// when a cycle persisted nothing; fallback covers a fresh restart from
+// persisted state.
+func (s *Server) lastCycle(fallback time.Time) time.Time {
+	if s.cfg.LastCycleDone != nil {
+		if t := s.cfg.LastCycleDone(); !t.IsZero() {
+			return t
+		}
+	}
+	return fallback
+}
+
+// agentInventories returns the poller's last-known agent inventories; empty without a poller.
+func (s *Server) agentInventories() []inventory.Inventory {
+	if s.cfg.AgentInventories == nil {
+		return nil
+	}
+	return s.cfg.AgentInventories()
+}
+
+// republishedSince reads each republish date from the notified bucket:
+// NotifiedAt is the detection time, unlike the always-fresh CheckedAt.
 func (s *Server) republishedSince(checks []store.CheckResult) map[string]time.Time {
 	out := make(map[string]time.Time)
 	for _, ch := range checks {
-		if ch.Kind != "DIGEST" {
+		if ch.Kind == "LOCAL" {
 			continue
 		}
 		if n, found, err := s.cfg.Store.GetNotified(ch.Ref); err == nil && found && !n.NotifiedAt.IsZero() {

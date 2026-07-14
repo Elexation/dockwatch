@@ -2,6 +2,7 @@ package httpd
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,11 @@ type fakeReader struct{ inv inventory.Inventory }
 func (f fakeReader) Read(context.Context) (inventory.Inventory, error) { return f.inv, nil }
 
 func newTestServer(t *testing.T, secure bool) (*Server, *store.Store) {
+	return newTestServerWith(t, secure, nil)
+}
+
+// newTestServerWith lets a test adjust the Config before New.
+func newTestServerWith(t *testing.T, secure bool, mod func(*Config)) (*Server, *store.Store) {
 	t.Helper()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -36,7 +42,7 @@ func newTestServer(t *testing.T, secure bool) (*Server, *store.Store) {
 		t.Fatalf("web.StaticFS: %v", err)
 	}
 	inv := inventory.Inventory{V: 1, Host: "local", Docker: inventory.DockerOK, Containers: []inventory.Container{}}
-	s := New(Config{
+	cfg := Config{
 		Renderer:         r,
 		Store:            st,
 		Local:            fakeReader{inv: inv},
@@ -44,8 +50,22 @@ func newTestServer(t *testing.T, secure bool) (*Server, *store.Store) {
 		LocalName:        "local",
 		NotificationsOff: true,
 		SecureCookie:     secure,
-	})
-	return s, st
+	}
+	if mod != nil {
+		mod(&cfg)
+	}
+	return New(cfg), st
+}
+
+// loginSession seeds the admin and returns a valid session cookie.
+func loginSession(t *testing.T, s *Server, st *store.Store) *http.Cookie {
+	t.Helper()
+	seedAdmin(t, st, "admin", "hunter2pass")
+	c := sessionCookieOf(do(s, "POST", "/login", url.Values{"username": {"admin"}, "password": {"hunter2pass"}}))
+	if c == nil {
+		t.Fatal("no session cookie after login")
+	}
+	return c
 }
 
 func seedAdmin(t *testing.T, st *store.Store, user, pw string) {
@@ -257,5 +277,122 @@ func TestStaticServed(t *testing.T) {
 	s, _ := newTestServer(t, false)
 	if rec := do(s, "GET", "/static/dw-harbor.css", nil); rec.Code != http.StatusOK {
 		t.Fatalf("GET /static/dw-harbor.css: code=%d, want 200", rec.Code)
+	}
+}
+
+func TestCheckNowTriggersScheduler(t *testing.T) {
+	calls := 0
+	s, st := newTestServerWith(t, false, func(c *Config) {
+		c.Trigger = func() { calls++ }
+	})
+	seedAdmin(t, st, "admin", "hunter2pass")
+
+	wantRedirect(t, do(s, "POST", "/check", nil), "/login")
+	if calls != 0 {
+		t.Fatal("unauthenticated POST /check reached the trigger")
+	}
+
+	cookie := sessionCookieOf(do(s, "POST", "/login", url.Values{"username": {"admin"}, "password": {"hunter2pass"}}))
+	rec := do(s, "POST", "/check", nil, cookie)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("POST /check: code=%d, want 202", rec.Code)
+	}
+	if calls != 1 {
+		t.Errorf("trigger called %d times, want 1", calls)
+	}
+}
+
+func TestCheckNowUnavailableWithoutScheduler(t *testing.T) {
+	s, st := newTestServer(t, false)
+	cookie := loginSession(t, s, st)
+	if rec := do(s, "POST", "/check", nil, cookie); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /check without a trigger: code=%d, want 503", rec.Code)
+	}
+}
+
+func TestCheckStatus(t *testing.T) {
+	done := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	s, st := newTestServerWith(t, false, func(c *Config) {
+		c.CheckRunning = func() bool { return true }
+		c.LastCycleDone = func() time.Time { return done }
+	})
+	cookie := loginSession(t, s, st)
+
+	rec := do(s, "GET", "/check", nil, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /check: code=%d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var got struct {
+		Running   bool   `json:"running"`
+		LastCycle string `json:"lastCycle"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if !got.Running || got.LastCycle != done.Format(time.RFC3339Nano) {
+		t.Errorf("status = %+v, want running with lastCycle %s", got, done.Format(time.RFC3339Nano))
+	}
+}
+
+func TestCheckStatusZeroBeforeFirstCycle(t *testing.T) {
+	s, st := newTestServer(t, false)
+	cookie := loginSession(t, s, st)
+	var got struct {
+		Running   bool   `json:"running"`
+		LastCycle string `json:"lastCycle"`
+	}
+	rec := do(s, "GET", "/check", nil, cookie)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if got.Running || got.LastCycle != "" {
+		t.Errorf("status = %+v, want idle with empty lastCycle", got)
+	}
+}
+
+func TestDashboardIncludesAgentRows(t *testing.T) {
+	agentInv := inventory.Inventory{
+		V: 1, Host: "pi4", Docker: inventory.DockerOK,
+		Containers: []inventory.Container{
+			{Name: "gitea-remote", Image: "gitea/gitea:1.24.3", State: "running", RepoDigests: []string{"gitea/gitea@sha256:aaa"}},
+		},
+	}
+	s, st := newTestServerWith(t, false, func(c *Config) {
+		c.AgentInventories = func() []inventory.Inventory { return []inventory.Inventory{agentInv} }
+	})
+	cookie := loginSession(t, s, st)
+
+	rec := do(s, "GET", "/", nil, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /: code=%d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"gitea-remote", "pi4"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard missing agent data %q", want)
+		}
+	}
+}
+
+func TestAgentsPageDockerUnavailable(t *testing.T) {
+	s, st := newTestServerWith(t, false, func(c *Config) {
+		c.AgentInventories = func() []inventory.Inventory {
+			return []inventory.Inventory{{V: 1, Host: "pi4", Docker: inventory.DockerUnavailable}}
+		}
+	})
+	if err := st.PutAgent(store.AgentStatus{Name: "pi4", LastOK: true, LastPoll: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	cookie := loginSession(t, s, st)
+
+	rec := do(s, "GET", "/agents", nil, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /agents: code=%d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Docker unavailable") {
+		t.Error("agents page missing the Docker unavailable pill")
 	}
 }

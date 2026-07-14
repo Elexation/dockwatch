@@ -66,6 +66,51 @@ func TestMergeGate(t *testing.T) {
 	}
 }
 
+func TestRunningAndLastCycle(t *testing.T) {
+	st := openStore(t)
+	p := NewPoller(emptyLocal{}, nil, nil, st, quietLogger())
+	s := NewScheduler(p, &fakeReg{}, st, quietLogger(), time.Hour, nil, nil)
+	s.startup = func() time.Duration { return 0 }
+	ft := newFakeTimer()
+	s.newTimer = func(time.Duration) schedTimer { return ft }
+
+	if s.Running() || !s.LastCycle().IsZero() {
+		t.Fatal("fresh scheduler must be idle with a zero LastCycle")
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var sawRunning atomic.Bool
+	s.cycle = func(context.Context, bool) {
+		sawRunning.Store(s.Running())
+		started <- struct{}{}
+		<-release
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+
+	before := time.Now()
+	s.Trigger()
+	<-started // cycle is in flight and blocked
+	if !s.Running() {
+		t.Error("Running() = false during a cycle")
+	}
+	close(release)
+	<-ft.reset // afterCycle finished, so fire() has stamped completion
+
+	if !sawRunning.Load() {
+		t.Error("running flag was not set before the cycle body ran")
+	}
+	if s.Running() {
+		t.Error("Running() = true after the cycle completed")
+	}
+	if last := s.LastCycle(); last.Before(before) {
+		t.Errorf("LastCycle = %v, want at or after %v", last, before)
+	}
+}
+
 func TestTimerReset(t *testing.T) {
 	st := openStore(t)
 	p := NewPoller(emptyLocal{}, nil, nil, st, quietLogger())

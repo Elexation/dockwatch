@@ -39,6 +39,9 @@ type Poller struct {
 	store       *store.Store
 	logger      *slog.Logger
 	pollTimeout time.Duration
+
+	mu          sync.Mutex
+	lastByAgent map[string]inventory.Inventory
 }
 
 // NewPoller builds a Poller; client may be nil only when agents is empty (local-only hub).
@@ -50,7 +53,24 @@ func NewPoller(local localReader, agents []Agent, client *http.Client, st *store
 		store:       st,
 		logger:      logger,
 		pollTimeout: agentPollTimeout,
+		lastByAgent: make(map[string]inventory.Inventory),
 	}
+}
+
+// AgentInventories returns each agent's most recently polled inventory, in
+// configuration order, skipping agents never yet reached. An unreachable
+// agent keeps its last known inventory rather than flapping off the
+// dashboard; the agents page and the down notification carry that signal.
+func (p *Poller) AgentInventories() []inventory.Inventory {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]inventory.Inventory, 0, len(p.agents))
+	for _, a := range p.agents {
+		if inv, ok := p.lastByAgent[a.Name]; ok {
+			out = append(out, inv)
+		}
+	}
+	return out
 }
 
 // NewClient builds the hub's mTLS dialer; the TLS 1.3 floor matches the agent.
@@ -102,6 +122,9 @@ func (p *Poller) Gather(ctx context.Context, now time.Time) []inventory.Inventor
 				p.logger.Warn("agent wire version mismatch", "agent", a.Name, "agent_v", inv.V, "hub_v", inventory.WireVersion)
 			}
 			p.recordAgent(a.Name, true, inv.V, certNotAfter, now)
+			p.mu.Lock()
+			p.lastByAgent[a.Name] = inv
+			p.mu.Unlock()
 			slots[1+i] = slot{inv: inv, include: true}
 		}(i, a)
 	}

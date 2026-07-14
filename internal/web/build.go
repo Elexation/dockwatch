@@ -12,19 +12,21 @@ import (
 
 // DashboardInput carries the page-level inputs beyond the raw inventories and checks.
 type DashboardInput struct {
-	LocalName        string               // host name of the local hub, sorted first
-	Theme            string               // "auto", "light", or "dark"
-	Layout           string               // "grouped" or "flat"
-	LastCycle        time.Time            // last completed check cycle
-	NotificationsOff bool                 // DW_NTFY_TOPIC unset
+	LocalName        string    // host name of the local hub, sorted first
+	Theme            string    // "auto", "light", or "dark"
+	Layout           string    // "grouped" or "flat"
+	LastCycle        time.Time // last completed check cycle
+	NotificationsOff bool      // DW_NTFY_TOPIC unset
+	Checking         bool
 	RepublishedSince map[string]time.Time // image ref -> when the republish was detected
 }
 
 // AgentsInput carries the page-level inputs for the agents page.
 type AgentsInput struct {
-	Theme            string            // "auto", "light", or "dark"
-	LastCycle        time.Time         // last completed check cycle
-	NotificationsOff bool              // DW_NTFY_TOPIC unset
+	Theme            string    // "auto", "light", or "dark"
+	LastCycle        time.Time // last completed check cycle
+	NotificationsOff bool      // DW_NTFY_TOPIC unset
+	Checking         bool
 	DockerStatus     map[string]string // agent name -> inventory.DockerOK or DockerUnavailable
 }
 
@@ -109,6 +111,7 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 			Layout:           in.Layout,
 			LastCycle:        in.LastCycle,
 			NotificationsOff: in.NotificationsOff,
+			Checking:         in.Checking,
 		},
 		Hosts:    hosts,
 		Groups:   groups,
@@ -133,6 +136,7 @@ func BuildAgents(agents []store.AgentStatus, in AgentsInput) AgentsVM {
 			Theme:            in.Theme,
 			LastCycle:        in.LastCycle,
 			NotificationsOff: in.NotificationsOff,
+			Checking:         in.Checking,
 		},
 		Empty: len(agents) == 0,
 	}

@@ -60,6 +60,7 @@ type ChromeVM struct {
 	Layout           string // "grouped" or "flat"; dashboard only
 	LastCycle        time.Time
 	NotificationsOff bool
+	Checking         bool // busy header: disabled button, "running…" cycle text
 }
 
 // RowVM is one container row on the dashboard.
@@ -141,6 +142,8 @@ type LoginVM struct {
 // deriveState resolves a row's version-cell state. The republished
 // check is a per-row join: shared check digest vs this container's
 // own running index digest, so one image can split across hosts.
+// It applies to DIGEST and SEMVER alike (a pinned tag can be republished
+// too); a newer tag outranks it.
 func deriveState(c inventory.Container, ch store.CheckResult, found bool) DisplayState {
 	if ch.Kind == "LOCAL" {
 		return StateLocal
@@ -157,7 +160,7 @@ func deriveState(c inventory.Container, ch store.CheckResult, found bool) Displa
 	if ch.Kind == "SEMVER" && ch.Latest != "" {
 		return StateUpdate
 	}
-	if ch.Kind == "DIGEST" && ch.RegistryDigest != "" && ch.RegistryDigest != runningIndexDigest(c, ch.Ref) {
+	if ch.RegistryDigest != "" && ch.RegistryDigest != runningIndexDigest(c, ch.Ref) {
 		return StateRepublished
 	}
 	return StateCurrent

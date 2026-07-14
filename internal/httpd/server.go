@@ -35,6 +35,14 @@ type Config struct {
 	NotificationsOff bool   // DW_NTFY_TOPIC unset
 	SecureCookie     bool   // DW_HTTPS or DW_TRUSTED_PROXY
 
+	// Check-now wiring into the hub scheduler and poller. Each func is
+	// optional: nil degrades its feature (no manual checks, no agent rows)
+	// instead of panicking.
+	Trigger          func()                       // Scheduler.Trigger
+	CheckRunning     func() bool                  // Scheduler.Running
+	LastCycleDone    func() time.Time             // Scheduler.LastCycle
+	AgentInventories func() []inventory.Inventory // Poller.AgentInventories; last-known, not live
+
 	// Transport (SPEC 12), consumed by Serve.
 	Port         int    // listen port
 	HTTPS        bool   // DW_HTTPS: serve TLS behind the port-sharing redirect listener
@@ -72,9 +80,11 @@ func New(cfg Config) *Server {
 
 func (s *Server) routes() {
 	mux := http.NewServeMux()
-	// Session-gated pages.
+	// Session-gated pages and the check-now endpoints.
 	mux.HandleFunc("GET /{$}", s.requireSession(s.dashboard))
 	mux.HandleFunc("GET /agents", s.requireSession(s.agents))
+	mux.HandleFunc("POST /check", s.requireSession(s.checkNow))
+	mux.HandleFunc("GET /check", s.requireSession(s.checkStatus))
 	// Unauthenticated surface.
 	mux.HandleFunc("GET /login", s.loginForm)
 	mux.HandleFunc("POST /login", s.loginSubmit)
