@@ -18,11 +18,7 @@
 	</nav>
 	<div class="dw-top-right">
 		<span class="dw-cycle intop">last cycle: {{if .Checking}}running…{{else}}{{with reltime .LastCycle}}{{.}}{{else}}-{{end}}{{end}}</span>
-		<select class="dw-themectl" aria-label="Theme" data-dw-theme>
-			<option value="auto"{{if eq .Theme "auto"}} selected{{end}}>theme: auto</option>
-			<option value="light"{{if eq .Theme "light"}} selected{{end}}>theme: light</option>
-			<option value="dark"{{if eq .Theme "dark"}} selected{{end}}>theme: dark</option>
-		</select>
+		<button class="dw-themectl" type="button" data-dw-theme aria-label="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme" title="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme"><span class="dw-themeglyph" aria-hidden="true"></span></button>
 		<button class="dw-check" type="button" data-dw-check{{if .Checking}} disabled data-dw-checking{{end}}>{{if .Checking}}<span class="dw-spin" aria-hidden="true"></span>Checking…{{else}}Check now{{end}}</button>
 		<form class="dw-logout" method="post" action="/logout"><button class="dw-signout" type="submit">Sign out</button></form>
 	</div>

@@ -178,7 +178,8 @@ func TestRenderDashboard(t *testing.T) {
 		"up to date", "local, not checkable", "auth required, not checkable",
 		"check delayed (rate limited)", "not checked yet",
 		"13 of 13 containers",
-		`data-theme="auto"`, "Notifications disabled.", "<wbr>")
+		`data-theme="dark"`, `aria-label="Switch to light theme"`, "dw-themeglyph",
+		"Notifications disabled.", "<wbr>")
 	if strings.Contains(out, "ignored:1.0") || strings.Contains(out, "stopped:1.0") {
 		t.Error("watch-gated container leaked into render")
 	}
@@ -246,7 +247,7 @@ func TestRenderAgents(t *testing.T) {
 func TestRenderAgentsEmpty(t *testing.T) {
 	r := testRenderer()
 	var buf bytes.Buffer
-	if err := r.RenderAgents(&buf, BuildAgents(nil, AgentsInput{Theme: "auto"})); err != nil {
+	if err := r.RenderAgents(&buf, BuildAgents(nil, AgentsInput{Theme: "dark"})); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	assertContains(t, "empty agents", buf.String(),

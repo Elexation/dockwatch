@@ -13,7 +13,7 @@ import (
 // DashboardInput carries the page-level inputs beyond the raw inventories and checks.
 type DashboardInput struct {
 	LocalName        string    // host name of the local hub, sorted first
-	Theme            string    // "auto", "light", or "dark"
+	Theme            string    // "light" or "dark"; dark is the default
 	Layout           string    // "grouped" or "flat"
 	LastCycle        time.Time // last completed check cycle
 	NotificationsOff bool      // DW_NTFY_TOPIC unset
@@ -23,7 +23,7 @@ type DashboardInput struct {
 
 // AgentsInput carries the page-level inputs for the agents page.
 type AgentsInput struct {
-	Theme            string    // "auto", "light", or "dark"
+	Theme            string    // "light" or "dark"; dark is the default
 	LastCycle        time.Time // last completed check cycle
 	NotificationsOff bool      // DW_NTFY_TOPIC unset
 	Checking         bool

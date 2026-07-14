@@ -56,7 +56,7 @@ const (
 // ChromeVM is the shared app-page chrome (header plus notifications notice).
 type ChromeVM struct {
 	Active           string // "dashboard" or "agents"; drives aria-current
-	Theme            string // "auto", "light", or "dark"
+	Theme            string // "light" or "dark"; dark is the default
 	Layout           string // "grouped" or "flat"; dashboard only
 	LastCycle        time.Time
 	NotificationsOff bool

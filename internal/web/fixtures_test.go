@@ -72,7 +72,7 @@ func sampleDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 
 	in := DashboardInput{
 		LocalName:        "home",
-		Theme:            "auto",
+		Theme:            "dark",
 		Layout:           "grouped",
 		LastCycle:        ago(5 * time.Minute),
 		NotificationsOff: true,
@@ -201,7 +201,7 @@ func sampleAgents() ([]store.AgentStatus, AgentsInput) {
 		{Name: "nas", LastOK: true, LastPoll: ago(41 * time.Minute), CertNotAfter: date(2031, 1, 15)},
 	}
 	in := AgentsInput{
-		Theme:            "auto",
+		Theme:            "dark",
 		LastCycle:        ago(5 * time.Minute),
 		NotificationsOff: true,
 		DockerStatus:     map[string]string{"nas": inventory.DockerUnavailable},
@@ -210,20 +210,20 @@ func sampleAgents() ([]store.AgentStatus, AgentsInput) {
 }
 
 func setupClean() SetupVM {
-	return SetupVM{Theme: "auto", Fields: setupFields("", "", "")}
+	return SetupVM{Theme: "dark", Fields: setupFields("", "", "")}
 }
 
 func setupErrors() SetupVM {
 	f := setupFields("Username is required.", "", "Passwords don't match.")
-	return SetupVM{Theme: "auto", Fields: f}
+	return SetupVM{Theme: "dark", Fields: f}
 }
 
 func loginClean() LoginVM {
-	return LoginVM{Theme: "auto", Fields: loginFields()}
+	return LoginVM{Theme: "dark", Fields: loginFields()}
 }
 
 func loginBanner() LoginVM {
-	return LoginVM{Theme: "auto", Banner: "Incorrect username or password", Fields: loginFields()}
+	return LoginVM{Theme: "dark", Banner: "Incorrect username or password", Fields: loginFields()}
 }
 
 func setupFields(userErr, pwErr, confirmErr string) []FieldVM {

@@ -3,11 +3,12 @@
 
 	var root = document.documentElement;
 
-	// server renders data-theme from the dw_theme cookie for a flash-free
+	// The server pre-renders data-theme from the cookie (flash-free); stale
+	// values, including the removed "auto", fall back to dark.
 	function readTheme() {
-		var m = document.cookie.match(/(?:^|;\s*)dw_theme=(auto|light|dark)/);
+		var m = document.cookie.match(/(?:^|;\s*)dw_theme=(light|dark)/);
 		if (m) return m[1];
-		try { return localStorage.getItem("dw_theme") || "auto"; } catch (e) { return "auto"; }
+		try { return localStorage.getItem("dw_theme") === "light" ? "light" : "dark"; } catch (e) { return "dark"; }
 	}
 	function persistTheme(v) {
 		try { localStorage.setItem("dw_theme", v); } catch (e) {}
@@ -17,20 +18,21 @@
 	var theme = readTheme();
 	root.setAttribute("data-theme", theme);
 
-	var themeSel = document.querySelector("[data-dw-theme]");
-	if (themeSel) {
-		themeSel.value = theme;
-		themeSel.addEventListener("change", function () {
-			theme = themeSel.value;
+	var themeBtn = document.querySelector("[data-dw-theme]");
+	function labelThemeBtn() {
+		var to = "Switch to " + (theme === "light" ? "dark" : "light") + " theme";
+		themeBtn.setAttribute("aria-label", to);
+		themeBtn.title = to;
+	}
+	if (themeBtn) {
+		labelThemeBtn();
+		themeBtn.addEventListener("click", function () {
+			theme = theme === "dark" ? "light" : "dark";
 			persistTheme(theme);
 			root.setAttribute("data-theme", theme);
+			labelThemeBtn();
 		});
 	}
-	try {
-		window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
-			if (theme === "auto") root.setAttribute("data-theme", "auto");
-		});
-	} catch (e) {}
 
 	// View toggle: grouped/flat is a persisted client pref; both subtrees render, CSS shows one.
 	var layouts = document.querySelector("[data-dw-layouts]");

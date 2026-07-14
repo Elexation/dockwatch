@@ -53,25 +53,6 @@ html, body { margin: 0; padding: 0; }
   --accent-text: oklch(0.45 0.1 195);
 }
 
-@media (prefers-color-scheme: light) {
-  .dw-root[data-theme="auto"] {
-    --bg: oklch(0.962 0.008 245);
-    --surface: oklch(0.99 0.004 245);
-    --surface-2: oklch(0.93 0.01 245);
-    --text: oklch(0.25 0.018 250);
-    --text-2: oklch(0.46 0.016 250);
-    --text-3: oklch(0.52 0.014 250);
-    --line: oklch(0.89 0.012 245);
-    --ok: oklch(0.55 0.13 155);
-    --warn: oklch(0.58 0.12 75);
-    --bad: oklch(0.54 0.17 25);
-    --warn-bg: oklch(0.95 0.035 80);
-    --bad-bg: oklch(0.94 0.03 25);
-    --accent: oklch(0.5 0.1 195);
-    --on-accent: #fff;
-    --accent-text: oklch(0.45 0.1 195);
-  }
-}
 .dw-root * { box-sizing: border-box; }
 .dw-root .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 .dw-root :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
@@ -87,9 +68,15 @@ html, body { margin: 0; padding: 0; }
 .dw-nav a[aria-current="page"] { color: var(--text); background: var(--surface-2); font-weight: 600; }
 .dw-top-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
 .dw-cycle { color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
-.dw-themectl { font: inherit; font-size: 12px; color: var(--text-3); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 20px 5px 7px; min-height: 34px; cursor: pointer; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%); background-position: calc(100% - 11px) 55%, calc(100% - 7px) 55%; background-size: 4px 4px; background-repeat: no-repeat; }
+.dw-themectl { display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 9px; min-height: 34px; cursor: pointer; }
 .dw-themectl:hover { border-color: var(--line); color: var(--text-2); }
-.dw-themectl option { background: var(--surface); color: var(--text); }
+/* The theme glyph shows the mode a click switches to: sun in dark, crescent in light. */
+.dw-themeglyph {
+  width: 7px; height: 7px; margin: 3.5px; border-radius: 50%; background: currentColor;
+  box-shadow: 0 -6px 0 -2px currentColor, 0 6px 0 -2px currentColor, 6px 0 0 -2px currentColor, -6px 0 0 -2px currentColor,
+    4.2px -4.2px 0 -2.2px currentColor, 4.2px 4.2px 0 -2.2px currentColor, -4.2px 4.2px 0 -2.2px currentColor, -4.2px -4.2px 0 -2.2px currentColor;
+}
+.dw-root[data-theme="light"] .dw-themeglyph { width: 14px; height: 14px; margin: 0; background: transparent; box-shadow: inset -4px -3px 0 0 currentColor; }
 .dw-logout { display: inline-flex; margin: 0; }
 .dw-signout { font: inherit; font-size: 12px; color: var(--text-3); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 10px; min-height: 34px; cursor: pointer; }
 .dw-signout:hover { border-color: var(--line); color: var(--text-2); }

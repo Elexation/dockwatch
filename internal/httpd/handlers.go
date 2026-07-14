@@ -274,15 +274,13 @@ func (s *Server) fail(w http.ResponseWriter, what string, err error) {
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 
-// themeFrom reads the theme cookie, defaulting to "auto".
+// themeFrom reads the theme cookie; anything but "light", including a stale
+// "auto", falls back to the dark default.
 func themeFrom(r *http.Request) string {
-	if c, err := r.Cookie(themeCookie); err == nil {
-		switch c.Value {
-		case "auto", "light", "dark":
-			return c.Value
-		}
+	if c, err := r.Cookie(themeCookie); err == nil && c.Value == "light" {
+		return "light"
 	}
-	return "auto"
+	return "dark"
 }
 
 func setupFields(username, userErr, pwErr, confirmErr string) []web.FieldVM {
