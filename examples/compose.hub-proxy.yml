@@ -1,0 +1,15 @@
+services:
+  dockwatch:
+    image: dockwatch
+    restart: unless-stopped
+    environment:
+      DW_TRUSTED_PROXY: "true"
+      DW_DOMAIN: updates.example.com
+      DW_NTFY_TOPIC: <random-long-topic>
+      DW_AGENT_HOME_URL: https://10.27.27.8:7443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/certs
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8080:8080"

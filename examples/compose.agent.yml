@@ -1,0 +1,11 @@
+services:
+  dockwatch-agent:
+    image: dockwatch
+    restart: unless-stopped
+    environment:
+      DW_MODE: agent
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/certs:ro          # operator placed bundle.pem here
+    ports:
+      - "7443:7443"

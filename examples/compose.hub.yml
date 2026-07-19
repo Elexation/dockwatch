@@ -1,0 +1,10 @@
+services:
+  dockwatch:
+    image: dockwatch
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/certs
+      - ./data:/data
+    ports:
+      - "8080:8080"
