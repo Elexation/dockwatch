@@ -1,0 +1,17 @@
+.git
+.gitignore
+.dockerignore
+.claude
+.playwright-mcp
+.agents
+skills-lock.json
+Dockerfile
+examples
+*.md
+LICENSE
+internal/web/.preview
+certs
+data
+dockwatch
+dockwatch.exe
+*.zip
