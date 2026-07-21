@@ -219,6 +219,47 @@ func TestRunCycleRateLimitCooldown(t *testing.T) {
 	}
 }
 
+func TestRunCycleTagFilterFromLabel(t *testing.T) {
+	const ref = "gitea/gitea:1.24.3"
+	repo, _ := repoOf(ref)
+	reg := &fakeReg{
+		// 2024.11.2 shares the scheme; only the label's filter excludes it.
+		tags:    map[string][]string{repo: {"1.24.3", "1.25.0", "2024.11.2"}},
+		digests: map[string]string{ref: "sha256:idx"},
+	}
+	local := fixedLocal{containers: []inventory.Container{
+		{Image: ref, State: "running", RepoDigests: []string{"repo@sha256:local"},
+			Labels: map[string]string{"dw.tags": `1\.\d+\.\d+`}},
+	}}
+
+	st := openStore(t)
+	s := newPipelineScheduler(t, local, reg, st)
+	s.runCycle(context.Background(), false)
+
+	got, found, _ := st.GetCheck(ref)
+	if !found || got.Latest != "1.25.0" || got.TagFilter != `1\.\d+\.\d+` {
+		t.Errorf("filtered check = %+v found=%v, want latest 1.25.0 with the filter recorded", got, found)
+	}
+}
+
+func TestDedupTagFilterConflict(t *testing.T) {
+	st := openStore(t)
+	s := newPipelineScheduler(t, emptyLocal{}, &fakeReg{}, st)
+	mk := func(filter string) inventory.Container {
+		c := inventory.Container{Image: "app:1.0.0", State: "running", RepoDigests: []string{"repo@sha256:x"}}
+		if filter != "" {
+			c.Labels = map[string]string{"dw.tags": filter}
+		}
+		return c
+	}
+	refs := s.dedup([]inventory.Inventory{{Host: "a", Containers: []inventory.Container{
+		mk("zzz"), mk("aaa"), mk(""),
+	}}})
+	if got := refs["app:1.0.0"].tagFilter; got != "aaa" {
+		t.Errorf("tagFilter = %q, want the lexicographically smallest non-empty (aaa)", got)
+	}
+}
+
 // newPipelineScheduler builds a scheduler whose runCycle can be called directly with deterministic (zero) jitter.
 func newPipelineScheduler(t *testing.T, local localReader, reg RegistryClient, st *store.Store) *Scheduler {
 	t.Helper()

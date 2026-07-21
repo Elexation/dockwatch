@@ -65,6 +65,20 @@ single mutual-TLS route and makes no outbound connections.
 Optional defense in depth: restrict the agent port (7443) to the hub's IP in the host
 firewall. DockWatch is secure without it (mutual TLS), but the rule is free.
 
+## Labels
+
+Both labels go on the watched container (in that container's compose file), never on
+DockWatch itself:
+
+- `dw.watch: "false"` excludes the container from the dashboard and all checks.
+- `dw.tags: "<regex>"` names which registry tags count as releases for that image,
+  e.g. `dw.tags: '\d+\.\d+\.\d+'`. Some images mix dates, build ids, or variant
+  suffixes into their version tags; when the dashboard shows a nonsensical "newer"
+  version, this filter is the fix. The whole tag must match ([RE2
+  syntax](https://github.com/google/re2/wiki/Syntax)), and an invalid pattern shows
+  as a check error for that image. Only affects images watched by version number;
+  mutable tags like `latest` are compared by digest and ignore it.
+
 ## Moving the image without a registry
 
 Both distribution paths are first-class: push to any registry, or ship the image over

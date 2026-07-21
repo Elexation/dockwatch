@@ -5,6 +5,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -55,12 +56,14 @@ func Classify(c inventory.Container) Kind {
 	return KindDigest
 }
 
-// Check performs the registry-side check for a non-local reference; the caller handles LOCAL images (no registry call) first.
-func Check(ctx context.Context, reg RegistryClient, ref string, now time.Time) store.CheckResult {
-	res := store.CheckResult{Ref: ref, CheckedAt: now}
+// Check performs the registry-side check for a non-local reference; the caller
+// handles LOCAL images (no registry call) first. A non-empty filter is the
+// image's dw.tags regex; empty means the scheme heuristic applies.
+func Check(ctx context.Context, reg RegistryClient, ref, filter string, now time.Time) store.CheckResult {
+	res := store.CheckResult{Ref: ref, TagFilter: filter, CheckedAt: now}
 	if tag, ok := tagOf(ref); ok && isSemver(tag) {
 		res.Kind = KindSemver.String()
-		checkSemver(ctx, reg, ref, tag, &res)
+		checkSemver(ctx, reg, ref, tag, filter, &res)
 	} else {
 		res.Kind = KindDigest.String()
 		checkDigest(ctx, reg, ref, &res)
@@ -68,15 +71,17 @@ func Check(ctx context.Context, reg RegistryClient, ref string, now time.Time) s
 	return res
 }
 
-// ShouldCheck reports whether ref needs a fresh check: a success within window is reused, force always rechecks, a prior non-success is retried.
-func ShouldCheck(prev store.CheckResult, found bool, now time.Time, window time.Duration, force bool) bool {
-	if force || !found || prev.Status != store.StatusOK {
+// ShouldCheck reports whether ref needs a fresh check: a success within window
+// is reused, force always rechecks, a prior non-success is retried, and a
+// changed tag filter invalidates the cached result.
+func ShouldCheck(prev store.CheckResult, found bool, now time.Time, window time.Duration, force bool, filter string) bool {
+	if force || !found || prev.Status != store.StatusOK || prev.TagFilter != filter {
 		return true
 	}
 	return now.Sub(prev.CheckedAt) >= window
 }
 
-func checkSemver(ctx context.Context, reg RegistryClient, ref, tag string, res *store.CheckResult) {
+func checkSemver(ctx context.Context, reg RegistryClient, ref, tag, filter string, res *store.CheckResult) {
 	cur, err := semver.NewVersion(tag)
 	if err != nil { // isSemver already passed; defensive
 		res.Status = store.StatusError
@@ -84,6 +89,17 @@ func checkSemver(ctx context.Context, reg RegistryClient, ref, tag string, res *
 		return
 	}
 	res.Current = tag
+
+	match := sameScheme(tag)
+	if filter != "" {
+		re, rerr := regexp.Compile("^(?:" + filter + ")$") // full-match; no substring surprises
+		if rerr != nil {
+			res.Status = store.StatusError
+			res.Err = "invalid dw.tags regex: " + rerr.Error()
+			return
+		}
+		match = re.MatchString
+	}
 
 	repo, ok := repoOf(ref)
 	if !ok {
@@ -96,7 +112,7 @@ func checkSemver(ctx context.Context, reg RegistryClient, ref, tag string, res *
 		applyErr(res, err)
 		return
 	}
-	if newer, kind := newestNewer(tag, cur, tags); newer != "" {
+	if newer, kind := newestNewer(cur, tags, match); newer != "" {
 		res.Latest = newer
 		res.UpdateKind = kind
 	}
@@ -130,15 +146,13 @@ func applyErr(res *store.CheckResult, err error) {
 	}
 }
 
-// newestNewer returns the newest registry tag of the same scheme as curTag that
-// is strictly greater than cur, plus the bump kind. It returns "","" when
-// nothing newer of the same scheme exists.
-func newestNewer(curTag string, cur *semver.Version, tags []string) (string, string) {
-	curScheme := schemeOf(curTag)
+// newestNewer returns the newest candidate tag (per match) strictly greater
+// than cur, plus the bump kind. It returns "","" when nothing newer matches.
+func newestNewer(cur *semver.Version, tags []string, match func(string) bool) (string, string) {
 	var best *semver.Version
 	var bestTag string
 	for _, t := range tags {
-		if schemeOf(t) != curScheme {
+		if !match(t) {
 			continue
 		}
 		v, err := semver.NewVersion(t)
@@ -153,6 +167,12 @@ func newestNewer(curTag string, cur *semver.Version, tags []string) (string, str
 		return "", ""
 	}
 	return bestTag, bumpKind(cur, best)
+}
+
+// sameScheme returns the v1 heuristic candidate predicate: tags shaped like curTag.
+func sameScheme(curTag string) func(string) bool {
+	want := schemeOf(curTag)
+	return func(t string) bool { return schemeOf(t) == want }
 }
 
 func bumpKind(cur, newer *semver.Version) string {

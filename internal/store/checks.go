@@ -25,6 +25,7 @@ type CheckResult struct {
 	Latest         string      `json:"latest,omitempty"`          // SEMVER: newest same-scheme tag, when newer
 	UpdateKind     string      `json:"update_kind,omitempty"`     // major | minor | patch, when computable
 	RegistryDigest string      `json:"registry_digest,omitempty"` // registry index digest of the tag
+	TagFilter      string      `json:"tag_filter,omitempty"`      // dw.tags regex in effect, "" = scheme heuristic
 	Status         CheckStatus `json:"status"`
 	CheckedAt      time.Time   `json:"checked_at"`
 	Err            string      `json:"err,omitempty"`

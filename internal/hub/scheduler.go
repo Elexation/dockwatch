@@ -197,7 +197,7 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 		}
 
 		prev, found, _ := s.store.GetCheck(ref)
-		if !ShouldCheck(prev, found, now, s.interval, force) {
+		if !ShouldCheck(prev, found, now, s.interval, force, agg.tagFilter) {
 			continue // fresh cache: left intact even if its registry is cooled below
 		}
 
@@ -212,7 +212,7 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 		}
 		first = false
 
-		res := Check(ctx, s.reg, ref, now)
+		res := Check(ctx, s.reg, ref, agg.tagFilter, now)
 		if res.Status == store.StatusRateLimited {
 			cooled[host] = true
 		}
@@ -247,11 +247,12 @@ type refAgg struct {
 	kind          Kind
 	runningDigest string
 	hosts         []string
+	tagFilter     string // dw.tags label; smallest non-empty value wins on conflict
 }
 
 // dedup collapses running, watched containers to unique image refs, accumulating
-// the hosts and a running digest per ref; a checkable classification beats LOCAL
-// when a ref appears as both.
+// the hosts, a running digest, and the dw.tags filter per ref; a checkable
+// classification beats LOCAL when a ref appears as both.
 func (s *Scheduler) dedup(invs []inventory.Inventory) map[string]*refAgg {
 	out := make(map[string]*refAgg)
 	for _, inv := range invs {
@@ -271,6 +272,16 @@ func (s *Scheduler) dedup(invs []inventory.Inventory) map[string]*refAgg {
 			}
 			if agg.runningDigest == "" {
 				agg.runningDigest = runningDigest(c, c.Image)
+			}
+			if f := c.Labels["dw.tags"]; f != "" && f != agg.tagFilter {
+				if agg.tagFilter == "" {
+					agg.tagFilter = f
+				} else {
+					if f < agg.tagFilter {
+						agg.tagFilter = f
+					}
+					s.logger.Warn("conflicting dw.tags labels for image", "ref", c.Image, "using", agg.tagFilter)
+				}
 			}
 		}
 	}
