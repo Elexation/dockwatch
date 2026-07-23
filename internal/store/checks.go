@@ -19,16 +19,23 @@ const (
 
 // CheckResult is a per-reference (not per-container) registry check; hosts sharing an image share one entry and one registry call.
 type CheckResult struct {
-	Ref            string      `json:"ref"`                       // full reference, e.g. gitea/gitea:1.24.3
-	Kind           string      `json:"kind"`                      // LOCAL | SEMVER | DIGEST
-	Current        string      `json:"current,omitempty"`         // SEMVER: the running tag's version
-	Latest         string      `json:"latest,omitempty"`          // SEMVER: newest same-scheme tag, when newer
-	UpdateKind     string      `json:"update_kind,omitempty"`     // major | minor | patch, when computable
-	RegistryDigest string      `json:"registry_digest,omitempty"` // registry index digest of the tag
-	TagFilter      string      `json:"tag_filter,omitempty"`      // dw.tags regex in effect, "" = scheme heuristic
-	Status         CheckStatus `json:"status"`
-	CheckedAt      time.Time   `json:"checked_at"`
-	Err            string      `json:"err,omitempty"`
+	Ref            string `json:"ref"`                       // full reference, e.g. gitea/gitea:1.24.3
+	Kind           string `json:"kind"`                      // LOCAL | SEMVER | DIGEST
+	Current        string `json:"current,omitempty"`         // SEMVER: the running tag's version
+	Latest         string `json:"latest,omitempty"`          // SEMVER: newest same-scheme tag, when newer
+	UpdateKind     string `json:"update_kind,omitempty"`     // major | minor | patch, when computable
+	RegistryDigest string `json:"registry_digest,omitempty"` // registry index digest of the tag
+	TagFilter      string `json:"tag_filter,omitempty"`      // dw.tags regex in effect, "" = scheme heuristic
+
+	// RepublishedAt is when the current RegistryDigest was published (the image
+	// config's created time), or when the hub first observed it if the publisher
+	// zeroed the build date; RepublishedEstimated marks that fallback.
+	RepublishedAt        time.Time `json:"republished_at,omitzero"`
+	RepublishedEstimated bool      `json:"republished_estimated,omitempty"`
+
+	Status    CheckStatus `json:"status"`
+	CheckedAt time.Time   `json:"checked_at"`
+	Err       string      `json:"err,omitempty"`
 }
 
 func (s *Store) PutCheck(r CheckResult) error {

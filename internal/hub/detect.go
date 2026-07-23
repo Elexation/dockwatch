@@ -21,6 +21,7 @@ import (
 type RegistryClient interface {
 	ListTags(ctx context.Context, repo string) ([]string, error)
 	Digest(ctx context.Context, ref string) (string, error)
+	Created(ctx context.Context, ref string) (time.Time, error)
 }
 
 // Kind classifies how an image's updates are detected.

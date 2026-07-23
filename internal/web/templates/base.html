@@ -94,7 +94,7 @@
 {{if eq .State "update" -}}
 <span class="dw-ver mono">{{.From}}<span class="arrow" aria-hidden="true">→</span><span class="to">{{.To}}</span>{{if .Bump}}<span class="dw-bump {{.Bump}}">{{.Bump}}</span>{{end}}</span>
 {{- else if eq .State "republished" -}}
-<span class="dw-ver dw-repub">republished{{with reltime .RepublishedAt}} {{.}}{{end}}</span>
+<span class="dw-ver dw-repub">republished{{with reltime .RepublishedAt}}{{if $.RepublishedEstimated}} · detected{{end}} {{.}}{{end}}</span>
 {{- else if eq .State "current" -}}
 <span class="dw-ver dw-mut">up to date</span>
 {{- else if eq .State "local" -}}

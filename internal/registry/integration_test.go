@@ -22,6 +22,19 @@ func TestListTagsLive(t *testing.T) {
 	}
 }
 
+func TestCreatedLive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	created, err := New().Created(ctx, "nginx:latest")
+	if err != nil {
+		t.Fatalf("Created: %v", err)
+	}
+	if created.IsZero() {
+		t.Fatal("Created returned a zero time for nginx:latest")
+	}
+}
+
 func TestDigestLive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

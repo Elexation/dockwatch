@@ -58,13 +58,13 @@ func sampleDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 	checks := []store.CheckResult{
 		semverUpdate("gitea/gitea:1.24.3", "1.24.3", "1.25.0", "minor"),
 		semverCurrent("vaultwarden/server:1.30.1", "1.30.1"),
-		digest("nginx:stable", "sha256:new"),
+		withRepublished(digest("nginx:stable", "sha256:new"), ago(72*time.Hour), false),
 		// "backups" has no check entry, so it resolves to pending.
 		semverUpdate("postgres:16.2", "16.2", "17.0", "major"),
 		semverUpdate("traefik:v3.1.0", "v3.1.0", "v3.1.2", "patch"),
 		semverCurrent("redis:7.2-alpine", "7.2-alpine"),
 		status("louislam/uptime-kuma:1", "DIGEST", store.StatusRateLimited),
-		digest("jellyfin/jellyfin:latest", "sha256:jnew"),
+		withRepublished(digest("jellyfin/jellyfin:latest", "sha256:jnew"), ago(26*time.Hour), true),
 		localCheck("my-dashboard:dev"),
 		status("plexinc/pms:1.40", "SEMVER", store.StatusAuthRequired),
 		semverCurrent("pihole/pihole:2024.07.0", "2024.07.0"),
@@ -76,10 +76,6 @@ func sampleDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 		Layout:           "grouped",
 		LastCycle:        ago(5 * time.Minute),
 		NotificationsOff: true,
-		RepublishedSince: map[string]time.Time{
-			"nginx:stable":             ago(72 * time.Hour),
-			"jellyfin/jellyfin:latest": ago(26 * time.Hour),
-		},
 	}
 	return []inventory.Inventory{home, server, pi4}, checks, in
 }
@@ -153,7 +149,7 @@ func stressDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 		semverCurrent("influxdb:2.7.11", "2.7.11"),
 		semverUpdate("adguard/adguardhome:v0.107.61", "v0.107.61", "v0.107.62", "patch"),
 		semverCurrent("klutchell/unbound:1.22.0", "1.22.0"),
-		semverRepublished("ghcr.io/wg-easy/wg-easy:14", "14", "sha256:wg2"),
+		withRepublished(semverRepublished("ghcr.io/wg-easy/wg-easy:14", "14", "sha256:wg2"), ago(72*time.Hour), false),
 		semverCurrent("ghcr.io/homarr-labs/homarr:1.18.1", "1.18.1"),
 		semverCurrent("binwiederhier/ntfy:v2.12.0", "v2.12.0"),
 		semverUpdate("freshrss/freshrss:1.26.2", "1.26.2", "1.26.3", "patch"),
@@ -169,27 +165,22 @@ func stressDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 		semverCurrent("ghcr.io/advplyr/audiobookshelf:2.21.0", "2.21.0"),
 		semverCurrent("lscr.io/linuxserver/calibre-web:0.6.24", "0.6.24"),
 		semverUpdate("ghcr.io/paperless-ngx/paperless-ngx:2.15.3", "2.15.3", "2.16.0", "minor"),
-		digest("minio/minio:latest", "sha256:mnnew"),
+		withRepublished(digest("minio/minio:latest", "sha256:mnnew"), ago(96*time.Hour), false),
 		semverCurrent("mariadb:11.4.5", "11.4.5"),
 		semverCurrent("mongo:8.0.9", "8.0.9"),
 		semverUpdate("ghcr.io/goauthentik/server:2026.4.1", "2026.4.1", "2026.5.0", "minor"),
 		semverCurrent("jc21/nginx-proxy-manager:2.12.3", "2.12.3"),
 		semverCurrent("gotify/server:2.6.1", "2.6.1"),
 		semverCurrent("miniflux/miniflux:2.2.8", "2.2.8"),
-		digest("searxng/searxng:latest", "sha256:sxnew"),
+		withRepublished(digest("searxng/searxng:latest", "sha256:sxnew"), ago(12*time.Hour), false),
 		status("registry.lan/backup-runner:1.4", "SEMVER", store.StatusAuthRequired),
 		semverCurrent("octoprint/octoprint:1.10.3", "1.10.3"),
 		status("homebridge/homebridge:2025-05-20", "SEMVER", store.StatusRateLimited),
 		semverUpdate("tailscale/tailscale:v1.84.0", "v1.84.0", "v1.84.2", "patch"),
 		semverCurrent("cloudflare/cloudflared:2026.5.1", "2026.5.1"),
-		digest("ghcr.io/analogj/scrutiny:master-omnibus", "sha256:scnew"),
+		withRepublished(digest("ghcr.io/analogj/scrutiny:master-omnibus", "sha256:scnew"), ago(120*time.Hour), true),
 		localCheck("pi-vpn:local"),
 	)
-
-	in.RepublishedSince["ghcr.io/wg-easy/wg-easy:14"] = ago(72 * time.Hour)
-	in.RepublishedSince["minio/minio:latest"] = ago(96 * time.Hour)
-	in.RepublishedSince["searxng/searxng:latest"] = ago(12 * time.Hour)
-	in.RepublishedSince["ghcr.io/analogj/scrutiny:master-omnibus"] = ago(120 * time.Hour)
 	return invs, checks, in
 }
 
@@ -272,6 +263,12 @@ func semverRepublished(ref, cur, registryDigest string) store.CheckResult {
 
 func digest(ref, registryDigest string) store.CheckResult {
 	return store.CheckResult{Ref: ref, Kind: "DIGEST", RegistryDigest: registryDigest, Status: store.StatusOK, CheckedAt: ago(2 * time.Hour)}
+}
+
+func withRepublished(r store.CheckResult, at time.Time, estimated bool) store.CheckResult {
+	r.RepublishedAt = at
+	r.RepublishedEstimated = estimated
+	return r
 }
 
 func localCheck(ref string) store.CheckResult {

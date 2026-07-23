@@ -242,6 +242,105 @@ func TestRunCycleTagFilterFromLabel(t *testing.T) {
 	}
 }
 
+func TestRunCycleRepublishedStamp(t *testing.T) {
+	const ref = "nginx:latest"
+	built := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	reg := &fakeReg{
+		digests: map[string]string{ref: "sha256:d1"},
+		created: map[string]time.Time{ref: built},
+	}
+	local := fixedLocal{containers: []inventory.Container{
+		{Image: ref, State: "running", RepoDigests: []string{"repo@sha256:local"}},
+	}}
+	st := openStore(t)
+	s := newPipelineScheduler(t, local, reg, st)
+
+	// The first observation fetches the registry's build date.
+	s.runCycle(context.Background(), false)
+	got, _, _ := st.GetCheck(ref)
+	if !got.RepublishedAt.Equal(built) || got.RepublishedEstimated {
+		t.Errorf("first check = %v estimated=%v, want %v estimated=false", got.RepublishedAt, got.RepublishedEstimated, built)
+	}
+	if reg.createdN != 1 {
+		t.Errorf("createdN = %d, want 1", reg.createdN)
+	}
+
+	// An unchanged digest neither refetches nor restamps.
+	s.runCycle(context.Background(), true)
+	if got, _, _ = st.GetCheck(ref); !got.RepublishedAt.Equal(built) {
+		t.Errorf("unchanged digest moved the date to %v", got.RepublishedAt)
+	}
+	if reg.createdN != 1 {
+		t.Errorf("createdN = %d after an unchanged recheck, want 1", reg.createdN)
+	}
+
+	// A new digest restamps from the registry.
+	built2 := built.Add(48 * time.Hour)
+	reg.digests[ref] = "sha256:d2"
+	reg.created[ref] = built2
+	s.runCycle(context.Background(), true)
+	if got, _, _ = st.GetCheck(ref); !got.RepublishedAt.Equal(built2) || got.RepublishedEstimated {
+		t.Errorf("republish = %v estimated=%v, want %v estimated=false", got.RepublishedAt, got.RepublishedEstimated, built2)
+	}
+}
+
+func TestRunCycleRepublishedFallback(t *testing.T) {
+	const ref = "nginx:latest"
+	// No created entry: the registry reports a zeroed build date.
+	reg := &fakeReg{digests: map[string]string{ref: "sha256:d1"}}
+	local := fixedLocal{containers: []inventory.Container{
+		{Image: ref, State: "running", RepoDigests: []string{"repo@sha256:local"}},
+	}}
+	st := openStore(t)
+	s := newPipelineScheduler(t, local, reg, st)
+	s.runCycle(context.Background(), false)
+
+	got, _, _ := st.GetCheck(ref)
+	if got.RepublishedAt.IsZero() || !got.RepublishedEstimated {
+		t.Errorf("fallback = %v estimated=%v, want the cycle time with estimated=true", got.RepublishedAt, got.RepublishedEstimated)
+	}
+}
+
+func TestRunCycleRepublishedCarry(t *testing.T) {
+	stamp := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	reg := &fakeReg{digErr: registry.ErrRateLimited}
+	local := fixedLocal{containers: []inventory.Container{
+		{Image: "nginx:latest", State: "running", RepoDigests: []string{"repo@sha256:local"}},
+		{Image: "redis:latest", State: "running", RepoDigests: []string{"repo@sha256:local"}},
+	}}
+	st := openStore(t)
+	for _, ref := range []string{"nginx:latest", "redis:latest"} {
+		if err := st.PutCheck(store.CheckResult{Ref: ref, Kind: "DIGEST", Status: store.StatusOK,
+			RegistryDigest: "sha256:d1", RepublishedAt: stamp, CheckedAt: time.Now().Add(-2 * time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := newPipelineScheduler(t, local, reg, st)
+
+	// One ref fails the check, the other hits the cooldown shortcut; both keep the date.
+	s.runCycle(context.Background(), false)
+	for _, ref := range []string{"nginx:latest", "redis:latest"} {
+		got, _, _ := st.GetCheck(ref)
+		if got.Status != store.StatusRateLimited || !got.RepublishedAt.Equal(stamp) {
+			t.Errorf("%s during the gap = %q %v, want rate-limited with the date kept", ref, got.Status, got.RepublishedAt)
+		}
+	}
+
+	// Recovery with the same digest keeps the date without a Created refetch.
+	reg.digErr = nil
+	reg.digests = map[string]string{"nginx:latest": "sha256:d1", "redis:latest": "sha256:d1"}
+	s.runCycle(context.Background(), false)
+	for _, ref := range []string{"nginx:latest", "redis:latest"} {
+		got, _, _ := st.GetCheck(ref)
+		if got.Status != store.StatusOK || !got.RepublishedAt.Equal(stamp) {
+			t.Errorf("%s after recovery = %q %v, want ok with the date kept", ref, got.Status, got.RepublishedAt)
+		}
+	}
+	if reg.createdN != 0 {
+		t.Errorf("createdN = %d, want 0: a blip must not refetch the build date", reg.createdN)
+	}
+}
+
 func TestDedupTagFilterConflict(t *testing.T) {
 	st := openStore(t)
 	s := newPipelineScheduler(t, emptyLocal{}, &fakeReg{}, st)

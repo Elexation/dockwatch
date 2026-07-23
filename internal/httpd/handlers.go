@@ -177,7 +177,6 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		LastCycle:        s.lastCycle(latestCheck(checks)),
 		NotificationsOff: s.cfg.NotificationsOff,
 		Checking:         s.checking(),
-		RepublishedSince: s.republishedSince(checks),
 	})
 	if err := s.cfg.Renderer.RenderDashboard(w, vm); err != nil {
 		slog.Error("render dashboard", "err", err)
@@ -239,21 +238,6 @@ func (s *Server) agentInventories() []inventory.Inventory {
 		return nil
 	}
 	return s.cfg.AgentInventories()
-}
-
-// republishedSince reads each republish date from the notified bucket:
-// NotifiedAt is the detection time, unlike the always-fresh CheckedAt.
-func (s *Server) republishedSince(checks []store.CheckResult) map[string]time.Time {
-	out := make(map[string]time.Time)
-	for _, ch := range checks {
-		if ch.Kind == "LOCAL" {
-			continue
-		}
-		if n, found, err := s.cfg.Store.GetNotified(ch.Ref); err == nil && found && !n.NotifiedAt.IsZero() {
-			out[ch.Ref] = n.NotifiedAt
-		}
-	}
-	return out
 }
 
 func (s *Server) renderSetup(w http.ResponseWriter, vm web.SetupVM) {

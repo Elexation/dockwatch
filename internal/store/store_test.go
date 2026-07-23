@@ -19,13 +19,15 @@ func TestCheckRoundTrip(t *testing.T) {
 	s := openTemp(t)
 	now := time.Now().Truncate(time.Second)
 	want := CheckResult{
-		Ref:        "gitea/gitea:1.24.3",
-		Kind:       "SEMVER",
-		Current:    "1.24.3",
-		Latest:     "1.25.0",
-		UpdateKind: "minor",
-		Status:     StatusOK,
-		CheckedAt:  now,
+		Ref:                  "gitea/gitea:1.24.3",
+		Kind:                 "SEMVER",
+		Current:              "1.24.3",
+		Latest:               "1.25.0",
+		UpdateKind:           "minor",
+		Status:               StatusOK,
+		CheckedAt:            now,
+		RepublishedAt:        now.Add(-time.Hour),
+		RepublishedEstimated: true,
 	}
 	if err := s.PutCheck(want); err != nil {
 		t.Fatalf("PutCheck: %v", err)
@@ -40,6 +42,10 @@ func TestCheckRoundTrip(t *testing.T) {
 	}
 	if !got.CheckedAt.Equal(want.CheckedAt) {
 		t.Errorf("CheckedAt = %v, want %v", got.CheckedAt, want.CheckedAt)
+	}
+	if !got.RepublishedAt.Equal(want.RepublishedAt) || got.RepublishedEstimated != want.RepublishedEstimated {
+		t.Errorf("republish fields = %v %v, want %v %v",
+			got.RepublishedAt, got.RepublishedEstimated, want.RepublishedAt, want.RepublishedEstimated)
 	}
 }
 

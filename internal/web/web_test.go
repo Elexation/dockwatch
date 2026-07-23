@@ -110,6 +110,13 @@ func TestBuildDashboardStress(t *testing.T) {
 	if wg.RepublishedAt.IsZero() {
 		t.Error("wg-easy republished date missing")
 	}
+	if wg.RepublishedEstimated {
+		t.Error("wg-easy date should be the registry's, not estimated")
+	}
+	sc := findRow(vm.FlatRows, "scrutiny")
+	if sc == nil || !sc.RepublishedEstimated {
+		t.Fatalf("scrutiny should carry an estimated republish date, got %+v", sc)
+	}
 }
 
 func TestRepublishedSplit(t *testing.T) {
@@ -175,6 +182,7 @@ func TestRenderDashboard(t *testing.T) {
 	out := buf.String()
 	assertContains(t, "dashboard", out,
 		"DockWatch", "gitea/<wbr>gitea", "1.25.0", "republished 3d ago",
+		"republished · detected 1d ago",
 		"up to date", "local, not checkable", "auth required, not checkable",
 		"check delayed (rate limited)", "not checked yet",
 		"13 of 13 containers",

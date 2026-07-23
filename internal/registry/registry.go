@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -47,6 +48,29 @@ func (c *Client) ListTags(ctx context.Context, repo string) ([]string, error) {
 		return nil, classify(err)
 	}
 	return tags, nil
+}
+
+// Created returns the build timestamp recorded in the image config ref resolves
+// to, resolving a multi-arch index to the library's default platform. Publishers
+// doing reproducible builds zero it, so a zero time with a nil error is valid.
+func (c *Client) Created(ctx context.Context, ref string) (time.Time, error) {
+	r, err := name.ParseReference(ref)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse reference %q: %w", ref, err)
+	}
+	desc, err := remote.Get(r, c.opts(ctx)...)
+	if err != nil {
+		return time.Time{}, classify(err)
+	}
+	img, err := desc.Image()
+	if err != nil {
+		return time.Time{}, classify(err)
+	}
+	cf, err := img.ConfigFile()
+	if err != nil {
+		return time.Time{}, classify(err)
+	}
+	return cf.Created.Time, nil
 }
 
 // Digest returns the index digest ref resolves to, matching Docker's repo digest so the two compare directly.

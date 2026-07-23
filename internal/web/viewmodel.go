@@ -65,16 +65,17 @@ type ChromeVM struct {
 
 // RowVM is one container row on the dashboard.
 type RowVM struct {
-	Host          string
-	Name          string
-	Image         string
-	State         string // DisplayState.String(), for the template switch
-	From          string // SEMVER: running version
-	To            string // SEMVER: newest available version
-	Bump          string // "major", "minor", or "patch"
-	RepublishedAt time.Time
-	Health        string // "healthy", "unhealthy", "starting", or "" for none
-	Checked       time.Time
+	Host                 string
+	Name                 string
+	Image                string
+	State                string // DisplayState.String(), for the template switch
+	From                 string // SEMVER: running version
+	To                   string // SEMVER: newest available version
+	Bump                 string // "major", "minor", or "patch"
+	RepublishedAt        time.Time
+	RepublishedEstimated bool   // date is the hub's first-seen time, not the registry's
+	Health               string // "healthy", "unhealthy", "starting", or "" for none
+	Checked              time.Time
 
 	rank DisplayState // unexported: the sort key
 }

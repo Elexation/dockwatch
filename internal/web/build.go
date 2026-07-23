@@ -18,7 +18,6 @@ type DashboardInput struct {
 	LastCycle        time.Time // last completed check cycle
 	NotificationsOff bool      // DW_NTFY_TOPIC unset
 	Checking         bool
-	RepublishedSince map[string]time.Time // image ref -> when the republish was detected
 }
 
 // AgentsInput carries the page-level inputs for the agents page.
@@ -61,7 +60,8 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 			case StateUpdate:
 				row.From, row.To, row.Bump = ch.Current, ch.Latest, ch.UpdateKind
 			case StateRepublished:
-				row.RepublishedAt = in.RepublishedSince[c.Image]
+				row.RepublishedAt = ch.RepublishedAt
+				row.RepublishedEstimated = ch.RepublishedEstimated
 			}
 			rows = append(rows, row)
 			if inv.Host != "" && !seen[inv.Host] {

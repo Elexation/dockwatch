@@ -13,12 +13,15 @@ import (
 )
 
 type fakeReg struct {
-	tags    map[string][]string
-	digests map[string]string
-	tagsErr error
-	digErr  error
-	listN   int
-	digN    int
+	tags       map[string][]string
+	digests    map[string]string
+	created    map[string]time.Time
+	tagsErr    error
+	digErr     error
+	createdErr error
+	listN      int
+	digN       int
+	createdN   int
 }
 
 func (f *fakeReg) ListTags(_ context.Context, repo string) ([]string, error) {
@@ -35,6 +38,14 @@ func (f *fakeReg) Digest(_ context.Context, ref string) (string, error) {
 		return "", f.digErr
 	}
 	return f.digests[ref], nil
+}
+
+func (f *fakeReg) Created(_ context.Context, ref string) (time.Time, error) {
+	f.createdN++
+	if f.createdErr != nil {
+		return time.Time{}, f.createdErr
+	}
+	return f.created[ref], nil
 }
 
 func container(image string, digested bool) inventory.Container {

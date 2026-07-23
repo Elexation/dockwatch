@@ -203,7 +203,8 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 
 		host := registryOf(ref)
 		if cooled[host] {
-			s.put(store.CheckResult{Ref: ref, Kind: agg.kind.String(), Status: store.StatusRateLimited, CheckedAt: now})
+			s.put(store.CheckResult{Ref: ref, Kind: agg.kind.String(), Status: store.StatusRateLimited, CheckedAt: now,
+				RepublishedAt: prev.RepublishedAt, RepublishedEstimated: prev.RepublishedEstimated})
 			continue
 		}
 
@@ -213,6 +214,7 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 		first = false
 
 		res := Check(ctx, s.reg, ref, agg.tagFilter, now)
+		s.stampRepublished(ctx, ref, prev, &res, now)
 		if res.Status == store.StatusRateLimited {
 			cooled[host] = true
 		}
@@ -239,6 +241,31 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 		s.notifier.NotifyUpdates(ctx, inputs, now)
 		s.notifier.NotifyAgents(ctx, now)
 	}
+}
+
+// stampRepublished carries or refreshes res's republish date. On a new registry
+// digest (or a date-less record from an older schema) it fetches the registry's
+// build timestamp, falling back to the current cycle time when the publisher
+// zeroed it. Failed checks carry the previous date forward, so a registry blip
+// never resets it; a failure record has no digest to compare against, so a
+// republish landing inside such a gap keeps the older date rather than
+// resetting on every blip.
+func (s *Scheduler) stampRepublished(ctx context.Context, ref string, prev store.CheckResult, res *store.CheckResult, now time.Time) {
+	res.RepublishedAt = prev.RepublishedAt
+	res.RepublishedEstimated = prev.RepublishedEstimated
+	if res.Status != store.StatusOK || res.RegistryDigest == "" {
+		return
+	}
+	if !prev.RepublishedAt.IsZero() && (prev.RegistryDigest == "" || res.RegistryDigest == prev.RegistryDigest) {
+		return
+	}
+	if created, err := s.reg.Created(ctx, ref); err == nil && created.Unix() > 0 {
+		res.RepublishedAt = created
+		res.RepublishedEstimated = false
+		return
+	}
+	res.RepublishedAt = now
+	res.RepublishedEstimated = true
 }
 
 // refAgg collects, per image reference, the facts the notifier joins across all
