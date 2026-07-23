@@ -1,6 +1,7 @@
 package web
 
 import (
+	"strings"
 	"time"
 
 	"github.com/elexation/dockwatch/internal/inventory"
@@ -154,6 +155,12 @@ func deriveState(c inventory.Container, ch store.CheckResult, found bool) Displa
 	}
 	switch ch.Status {
 	case store.StatusAuthRequired:
+		// A bare name can only be a Docker Hub official image, and those are
+		// always public, so auth-required proves a local build. (Containerd-store
+		// hosts stamp repo digests on local builds, defeating the LOCAL classifier.)
+		if !strings.Contains(ch.Ref, "/") {
+			return StateLocal
+		}
 		return StateAuth
 	case store.StatusRateLimited:
 		return StateRate

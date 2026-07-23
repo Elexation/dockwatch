@@ -42,7 +42,8 @@ func TestDeriveState(t *testing.T) {
 		{"local", local("x", "x:dev", ""), store.CheckResult{Kind: "LOCAL", CheckedAt: fixedNow}, true, StateLocal},
 		{"pending-missing", running("x", "x:1", "x@sha256:a", ""), store.CheckResult{}, false, StatePending},
 		{"pending-zerotime", running("x", "x:1", "x@sha256:a", ""), store.CheckResult{Kind: "SEMVER"}, true, StatePending},
-		{"auth", running("x", "x:1", "x@sha256:a", ""), store.CheckResult{Kind: "SEMVER", Status: store.StatusAuthRequired, CheckedAt: fixedNow}, true, StateAuth},
+		{"auth", running("x", "ns/x:1", "ns/x@sha256:a", ""), store.CheckResult{Ref: "ns/x:1", Kind: "SEMVER", Status: store.StatusAuthRequired, CheckedAt: fixedNow}, true, StateAuth},
+		{"auth-bare-name-is-local", running("x", "x:1", "x@sha256:a", ""), store.CheckResult{Ref: "x:1", Kind: "DIGEST", Status: store.StatusAuthRequired, CheckedAt: fixedNow}, true, StateLocal},
 		{"rate", running("x", "x:1", "x@sha256:a", ""), store.CheckResult{Kind: "DIGEST", Status: store.StatusRateLimited, CheckedAt: fixedNow}, true, StateRate},
 		{"update", running("x", "x:1", "x@sha256:a", ""), store.CheckResult{Kind: "SEMVER", Latest: "2", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateUpdate},
 		{"current-semver", running("x", "x:1", "x@sha256:a", ""), store.CheckResult{Kind: "SEMVER", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateCurrent},
@@ -132,6 +133,29 @@ func TestRepublishedSplit(t *testing.T) {
 	}
 	if cache.State != "current" {
 		t.Errorf("nginx-cache (running new digest): got %q, want current", cache.State)
+	}
+}
+
+func TestBareNameAuthRendersLocal(t *testing.T) {
+	invs := []inventory.Inventory{{
+		V: 1, Host: "home", Docker: inventory.DockerOK,
+		Containers: []inventory.Container{
+			running("dockwatch", "dockwatch", "dockwatch@sha256:self", "healthy"),
+			running("plex", "plexinc/pms:1.40", "plexinc/pms@sha256:x1", ""),
+		},
+	}}
+	checks := []store.CheckResult{
+		status("dockwatch", "DIGEST", store.StatusAuthRequired),
+		status("plexinc/pms:1.40", "SEMVER", store.StatusAuthRequired),
+	}
+	vm := BuildDashboard(invs, checks, DashboardInput{})
+	dw := findRow(vm.FlatRows, "dockwatch")
+	if dw == nil || dw.State != "local" {
+		t.Errorf("bare-name auth ref: got %+v, want state local", dw)
+	}
+	plex := findRow(vm.FlatRows, "plex")
+	if plex == nil || plex.State != "auth" {
+		t.Errorf("namespaced auth ref: got %+v, want state auth", plex)
 	}
 }
 
