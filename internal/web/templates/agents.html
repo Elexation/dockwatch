@@ -1,25 +1,15 @@
-<!DOCTYPE html>
-<html lang="en" class="dw-root" data-theme="{{.Chrome.Theme}}" data-density="compact">
-<head>{{template "head" "Agents"}}</head>
-<body>
-{{template "header" .Chrome}}
-{{if .Chrome.NotificationsOff}}{{template "notice"}}{{end}}
-<main class="dw-main">
+{{define "agents" -}}
+{{template "appopen" (dict "Chrome" .Chrome "Title" "Agents")}}
 	<div class="dw-pagehead">
 		<h1>Agents</h1>
 		<span class="sub">machines DockWatch polls, defined in config, read-only here</span>
 	</div>
 	{{if .Empty}}
-	<div class="dw-empty">
-		<div class="big">No machines configured</div>
-		<div>DockWatch is watching this host only.</div>
-	</div>
+	{{template "empty" (dict "Big" "No machines configured" "Msg" "DockWatch is watching this host only.")}}
 	{{else}}
 	<div class="dw-agents">
 		{{range .Cards}}{{template "agentcard" .}}{{end}}
 	</div>
 	{{end}}
-</main>
-{{template "appjs"}}
-</body>
-</html>
+{{template "appclose"}}
+{{- end}}

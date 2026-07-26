@@ -122,8 +122,11 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 		vm.EmptyMsg = "Nothing is running yet on the configured hosts."
 		return vm
 	}
-	vm.Summary = fmt.Sprintf("%d of %d containers · %d %s",
-		len(rows), len(rows), updates, plural(updates, "update", "updates"))
+	tail := fmt.Sprintf("%d %s", updates, plural(updates, "update", "updates"))
+	if in.Checking {
+		tail = "checking…" // matches the tail app.js swaps in mid-cycle
+	}
+	vm.Summary = fmt.Sprintf("%d of %d containers · %s", len(rows), len(rows), tail)
 	return vm
 }
 

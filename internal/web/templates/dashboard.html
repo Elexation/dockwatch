@@ -1,16 +1,8 @@
-<!DOCTYPE html>
-<html lang="en" class="dw-root" data-theme="{{.Chrome.Theme}}" data-density="compact">
-<head>{{template "head" "Dashboard"}}</head>
-<body>
-{{template "header" .Chrome}}
-{{if .Chrome.NotificationsOff}}{{template "notice"}}{{end}}
-<main class="dw-main">
+{{define "dashboard" -}}
+{{template "appopen" (dict "Chrome" .Chrome "Title" "Dashboard")}}
 {{template "toolbar" .}}
 {{if .Empty}}
-<div class="dw-empty">
-	<div class="big">No containers found</div>
-	<div>{{.EmptyMsg}}</div>
-</div>
+{{template "empty" (dict "Big" "No containers found" "Msg" .EmptyMsg)}}
 {{else}}
 <div class="dw-layouts" data-layout="{{.Chrome.Layout}}" data-dw-layouts>
 	<div class="dw-groupedwrap">
@@ -22,12 +14,7 @@
 		</section>
 	</div>
 </div>
-<div class="dw-empty" data-dw-noresults hidden>
-	<div class="big">No containers found</div>
-	<div>Nothing matches the current filters.</div>
-</div>
+{{template "empty" (dict "Big" "No containers found" "Msg" "Nothing matches the current filters." "Filter" true)}}
 {{end}}
-</main>
-{{template "appjs"}}
-</body>
-</html>
+{{template "appclose"}}
+{{- end}}

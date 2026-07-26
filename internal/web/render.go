@@ -40,6 +40,7 @@ func newRenderer(now func() time.Time) (*Renderer, error) {
 	return r, nil
 }
 
+// StaticFS returns the embedded static assets, rooted so that paths are served without the static prefix.
 func StaticFS() (fs.FS, error) {
 	return fs.Sub(staticFS, "static")
 }
@@ -56,10 +57,10 @@ func (r *Renderer) RenderLogin(w io.Writer, vm LoginVM) error {
 
 // RenderDashboard writes the dashboard page.
 func (r *Renderer) RenderDashboard(w io.Writer, vm DashboardVM) error {
-	return r.tpl.ExecuteTemplate(w, "dashboard.html", vm)
+	return r.tpl.ExecuteTemplate(w, "dashboard", vm)
 }
 
 // RenderAgents writes the agents page.
 func (r *Renderer) RenderAgents(w io.Writer, vm AgentsVM) error {
-	return r.tpl.ExecuteTemplate(w, "agents.html", vm)
+	return r.tpl.ExecuteTemplate(w, "agents", vm)
 }

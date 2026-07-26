@@ -17,6 +17,7 @@ import (
 const (
 	sessionCookie = "dw_session"
 	themeCookie   = "dw_theme"
+	layoutCookie  = "dw_layout"
 	defaultTTL    = 30 * 24 * time.Hour // sliding session lifetime (SPEC 11)
 )
 

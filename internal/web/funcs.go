@@ -10,10 +10,17 @@ import (
 // funcMap returns the template functions, closing over the renderer's clock for consistent relative times.
 func (r *Renderer) funcMap() template.FuncMap {
 	return template.FuncMap{
-		"reltime":     func(t time.Time) string { return relativeTime(r.now(), t) },
+		"reltime": func(t time.Time) string { return relativeTime(r.now(), t) },
+		"reltimeOrDash": func(t time.Time) string {
+			if s := relativeTime(r.now(), t); s != "" {
+				return s
+			}
+			return "-"
+		},
 		"expiryDate":  expiryDate,
 		"wbrImageRef": wbrImageRef,
 		"dict":        dict,
+		"plural":      plural,
 	}
 }
 

@@ -45,15 +45,6 @@ func (s DisplayState) String() string {
 	}
 }
 
-// Reachability is an agent's resolved contact state, used only while building agent cards.
-type Reachability int
-
-const (
-	ReachOK       Reachability = iota // reachable, Docker up
-	ReachDown                         // unreachable
-	ReachNoDocker                     // reachable but the Docker daemon is down
-)
-
 // ChromeVM is the shared app-page chrome (header plus notifications notice).
 type ChromeVM struct {
 	Active           string // "dashboard" or "agents"; drives aria-current

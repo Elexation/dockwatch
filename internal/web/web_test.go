@@ -215,6 +215,9 @@ func TestRenderDashboard(t *testing.T) {
 	if strings.Contains(out, "ignored:1.0") || strings.Contains(out, "stopped:1.0") {
 		t.Error("watch-gated container leaked into render")
 	}
+	if strings.Contains(out, "data-checking") {
+		t.Error("idle dashboard stamped the busy-swap attribute")
+	}
 	assertNoBannedGlyph(t, "dashboard", out)
 }
 
@@ -228,7 +231,7 @@ func TestRenderDashboardChecking(t *testing.T) {
 	}
 	out := buf.String()
 	assertContains(t, "checking dashboard", out,
-		"last cycle: running…", "Checking…", "dw-spin", "data-dw-checking", " disabled")
+		"data-checking", "running…", "· checking…", "Checking…", "dw-spin", "data-dw-checking", " disabled")
 	assertNoBannedGlyph(t, "checking dashboard", out)
 }
 

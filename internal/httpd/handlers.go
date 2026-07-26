@@ -173,7 +173,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	vm := web.BuildDashboard(invs, checks, web.DashboardInput{
 		LocalName:        s.cfg.LocalName,
 		Theme:            themeFrom(r),
-		Layout:           "grouped",
+		Layout:           layoutFrom(r),
 		LastCycle:        s.lastCycle(latestCheck(checks)),
 		NotificationsOff: s.cfg.NotificationsOff,
 		Checking:         s.checking(),
@@ -265,6 +265,14 @@ func themeFrom(r *http.Request) string {
 		return "light"
 	}
 	return "dark"
+}
+
+// layoutFrom reads the layout cookie; anything but "flat" falls back to the grouped default.
+func layoutFrom(r *http.Request) string {
+	if c, err := r.Cookie(layoutCookie); err == nil && c.Value == "flat" {
+		return "flat"
+	}
+	return "grouped"
 }
 
 func setupFields(username, userErr, pwErr, confirmErr string) []web.FieldVM {

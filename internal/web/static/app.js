@@ -7,11 +7,9 @@
 	// values, including the removed "auto", fall back to dark.
 	function readTheme() {
 		var m = document.cookie.match(/(?:^|;\s*)dw_theme=(light|dark)/);
-		if (m) return m[1];
-		try { return localStorage.getItem("dw_theme") === "light" ? "light" : "dark"; } catch (e) { return "dark"; }
+		return m ? m[1] : "dark";
 	}
 	function persistTheme(v) {
-		try { localStorage.setItem("dw_theme", v); } catch (e) {}
 		try { document.cookie = "dw_theme=" + v + "; path=/; max-age=31536000; samesite=strict"; } catch (e) {}
 	}
 
@@ -35,6 +33,12 @@
 	}
 
 	// View toggle: grouped/flat is a persisted client pref; both subtrees render, CSS shows one.
+	// Persisted like the theme, in a cookie the server pre-renders from, so the first
+	// paint already shows the chosen view.
+	function persistLayout(v) {
+		try { document.cookie = "dw_layout=" + v + "; path=/; max-age=31536000; samesite=strict"; } catch (e) {}
+	}
+
 	var layouts = document.querySelector("[data-dw-layouts]");
 	var seg = document.querySelector("[data-dw-seg]");
 	function applyLayout(v) {
@@ -48,14 +52,11 @@
 		}
 	}
 	if (seg && layouts) {
-		var saved;
-		try { saved = localStorage.getItem("dw_layout"); } catch (e) {}
-		if (saved) applyLayout(saved);
 		var segButtons = seg.querySelectorAll("[data-dw-layout]");
 		for (var j = 0; j < segButtons.length; j++) {
 			segButtons[j].addEventListener("click", function () {
 				var v = this.getAttribute("data-dw-layout");
-				try { localStorage.setItem("dw_layout", v); } catch (e) {}
+				persistLayout(v);
 				applyLayout(v);
 			});
 		}
@@ -117,17 +118,8 @@
 
 	function setCheckingUI() {
 		checking = true;
-		if (checkBtn) {
-			checkBtn.disabled = true;
-			checkBtn.textContent = "";
-			var spin = document.createElement("span");
-			spin.className = "dw-spin";
-			spin.setAttribute("aria-hidden", "true");
-			checkBtn.appendChild(spin);
-			checkBtn.appendChild(document.createTextNode("Checking…"));
-		}
-		var cycle = document.querySelector(".dw-cycle");
-		if (cycle) cycle.textContent = "last cycle: running…";
+		root.setAttribute("data-checking", "");
+		if (checkBtn) checkBtn.disabled = true;
 		var vers = document.querySelectorAll(".dw-ver");
 		for (var i = 0; i < vers.length; i++) {
 			vers[i].className = "dw-ver dw-checking";
@@ -141,14 +133,17 @@
 		updateCount();
 	}
 
+	// usable is the shared "this response carries data" test; a redirect means the
+	// session gate bounced us, so the body is a login page rather than JSON.
+	function usable(r) { return r.ok && !r.redirected; }
+
 	// pollStatus reloads once done(status) holds; a redirect means the session
 	// is gone (reload lands on login), a network error keeps polling.
 	function pollStatus(done) {
 		var timer = setInterval(function () {
 			fetch("/check").then(function (r) {
 				if (r.redirected) { location.reload(); return null; }
-				if (!r.ok) return null;
-				return r.json();
+				return usable(r) ? r.json() : null;
 			}).then(function (s) {
 				if (s && done(s)) {
 					clearInterval(timer);
@@ -163,11 +158,11 @@
 			if (checking) return;
 			checking = true; // block re-entry while the POST is in flight
 			fetch("/check").then(function (r) {
-				return r.ok && !r.redirected ? r.json() : null;
+				return usable(r) ? r.json() : null;
 			}).then(function (pre) {
 				var last = pre ? pre.lastCycle : "";
 				return fetch("/check", { method: "POST" }).then(function (r) {
-					if (!r.ok || r.redirected) throw new Error("check rejected");
+					if (!usable(r)) throw new Error("check rejected");
 					setCheckingUI();
 					pollStatus(function (s) { return s.lastCycle !== last; });
 				});

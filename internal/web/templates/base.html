@@ -9,6 +9,42 @@
 <script src="/static/app.js" defer></script>
 {{- end}}
 
+{{define "appopen" -}}
+<!DOCTYPE html>
+<html lang="en" class="dw-root" data-theme="{{.Chrome.Theme}}"{{if .Chrome.Checking}} data-checking{{end}}>
+<head>{{template "head" .Title}}</head>
+<body>
+{{template "header" .Chrome}}
+{{if .Chrome.NotificationsOff}}{{template "notice"}}{{end}}
+<main class="dw-main">
+{{- end}}
+
+{{define "appclose" -}}
+</main>
+{{template "appjs"}}
+</body>
+</html>
+{{- end}}
+
+{{define "authopen" -}}
+<!DOCTYPE html>
+<html lang="en" class="dw-root" data-theme="{{.Theme}}">
+<head>{{template "head" .Title}}</head>
+<body>
+{{- end}}
+
+{{define "authclose" -}}
+</body>
+</html>
+{{- end}}
+
+{{define "empty" -}}
+<div class="dw-empty"{{if .Filter}} data-dw-noresults hidden{{end}}>
+	<div class="big">{{.Big}}</div>
+	<div>{{.Msg}}</div>
+</div>
+{{- end}}
+
 {{define "header" -}}
 <header class="dw-top">
 	<a class="dw-mark" href="/"><span class="dw-glyph" aria-hidden="true"></span>DockWatch</a>
@@ -17,17 +53,17 @@
 		<a href="/agents"{{if eq .Active "agents"}} aria-current="page"{{end}}>Agents</a>
 	</nav>
 	<div class="dw-top-right">
-		<span class="dw-cycle intop">last cycle: {{if .Checking}}running…{{else}}{{with reltime .LastCycle}}{{.}}{{else}}-{{end}}{{end}}</span>
-		<button class="dw-themectl" type="button" data-dw-theme aria-label="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme" title="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme"><span class="dw-themeglyph" aria-hidden="true"></span></button>
-		<button class="dw-check" type="button" data-dw-check{{if .Checking}} disabled data-dw-checking{{end}}>{{if .Checking}}<span class="dw-spin" aria-hidden="true"></span>Checking…{{else}}Check now{{end}}</button>
-		<form class="dw-logout" method="post" action="/logout"><button class="dw-signout" type="submit">Sign out</button></form>
+		<span class="dw-cycle">last cycle: <span class="idle">{{reltimeOrDash .LastCycle}}</span><span class="busy">running…</span></span>
+		<button class="dw-btnghost dw-themectl" type="button" data-dw-theme aria-label="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme" title="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme"><span class="dw-themeglyph" aria-hidden="true"></span></button>
+		<button class="dw-btnprimary dw-check" type="button" data-dw-check{{if .Checking}} disabled data-dw-checking{{end}}><span class="idle">Check now</span><span class="busy"><span class="dw-spin" aria-hidden="true"></span>Checking…</span></button>
+		<form class="dw-logout" method="post" action="/logout"><button class="dw-btnghost dw-signout" type="submit">Sign out</button></form>
 	</div>
 </header>
 {{- end}}
 
 {{define "notice" -}}
 <div class="dw-notice" role="status">
-	<span class="dot" aria-hidden="true"></span>
+	<span class="dw-dot dot" aria-hidden="true"></span>
 	<span><b>Notifications disabled.</b> Set a notification topic to get update alerts.</span>
 </div>
 {{- end}}
@@ -65,8 +101,8 @@
 <section class="dw-group" aria-label="Host {{.Host}}" data-host="{{.Host}}">
 	<div class="dw-ghead">
 		<span class="hname">{{.Host}}</span>
-		<span class="hmeta">{{.Count}} container{{if ne .Count 1}}s{{end}}</span>
-		{{if gt .Updates 0}}<span class="hup">{{.Updates}} update{{if gt .Updates 1}}s{{end}}</span>{{end}}
+		<span class="hmeta">{{.Count}} {{plural .Count "container" "containers"}}</span>
+		{{if gt .Updates 0}}<span class="hup">{{.Updates}} {{plural .Updates "update" "updates"}}</span>{{end}}
 	</div>
 	{{range .Rows}}{{template "row" (dict "R" . "Flat" false)}}{{end}}
 </section>
@@ -75,24 +111,24 @@
 {{define "row" -}}
 {{$r := .R -}}
 <div class="dw-row{{if .Flat}} flat{{end}}" data-host="{{$r.Host}}" data-state="{{$r.State}}">
-	{{if .Flat}}<span class="dw-host">{{$r.Host}}</span>{{end}}
+	{{if .Flat}}<span class="dw-host mono">{{$r.Host}}</span>{{end}}
 	<div>
 		<div class="dw-cname">{{$r.Name}}</div>
 		<div class="dw-cimg mono">{{wbrImageRef $r.Image}}</div>
 	</div>
 	{{template "versioncell" $r}}
 	<span class="dw-cell-health">{{template "healthbadge" $r.Health}}</span>
-	<span class="dw-time dw-cell-time">{{with reltime $r.Checked}}{{.}}{{else}}-{{end}}</span>
+	<span class="dw-time dw-cell-time">{{reltimeOrDash $r.Checked}}</span>
 	<div class="dw-mobilefoot">
 		{{template "healthbadge" $r.Health}}
-		<span class="dw-time">{{with reltime $r.Checked}}{{.}}{{else}}-{{end}}</span>
+		<span class="dw-time">{{reltimeOrDash $r.Checked}}</span>
 	</div>
 </div>
 {{- end}}
 
 {{define "versioncell" -}}
 {{if eq .State "update" -}}
-<span class="dw-ver mono">{{.From}}<span class="arrow" aria-hidden="true">→</span><span class="to">{{.To}}</span>{{if .Bump}}<span class="dw-bump {{.Bump}}">{{.Bump}}</span>{{end}}</span>
+<span class="dw-ver mono">{{.From}}<span class="arrow" aria-hidden="true">→</span><span class="to">{{.To}}</span>{{if .Bump}}<span class="dw-tone dw-bump {{.Bump}}">{{.Bump}}</span>{{end}}</span>
 {{- else if eq .State "republished" -}}
 <span class="dw-ver dw-repub">republished{{with reltime .RepublishedAt}}{{if $.RepublishedEstimated}} · detected{{end}} {{.}}{{end}}</span>
 {{- else if eq .State "current" -}}
@@ -110,7 +146,7 @@
 
 {{define "healthbadge" -}}
 {{if or (eq . "healthy") (eq . "unhealthy") (eq . "starting") -}}
-<span class="dw-health {{.}}"><span class="hd" aria-hidden="true"></span>{{.}}</span>
+<span class="dw-health {{.}}"><span class="dw-dot hd" aria-hidden="true"></span>{{.}}</span>
 {{- else -}}
 <span class="dw-health none" title="No health check configured">-</span>
 {{- end}}
@@ -120,12 +156,28 @@
 <article class="dw-agent">
 	<div class="ahead">
 		<span class="aname">{{.Name}}</span>
-		<span class="dw-reach {{.ReachClass}}"><span class="rd" aria-hidden="true"></span>{{.ReachLabel}}</span>
+		<span class="dw-tone dw-reach {{.ReachClass}}"><span class="dw-dot rd" aria-hidden="true"></span>{{.ReachLabel}}</span>
 	</div>
-	<div class="arow"><span class="al">Last successful poll</span><span class="av">{{with reltime .LastPoll}}{{.}}{{else}}-{{end}}</span></div>
+	<div class="arow"><span class="al">Last successful poll</span><span class="av">{{reltimeOrDash .LastPoll}}</span></div>
 	<div class="arow"><span class="al">Certificate</span><span class="av mono">{{expiryDate .CertNotAfter}}</span></div>
-	{{range .Flags}}<div class="dw-aflag warn"><span class="fdot" aria-hidden="true"></span><span>{{.}}</span></div>{{end}}
+	{{range .Flags}}<div class="dw-tone dw-aflag warn"><span class="dw-dot fdot" aria-hidden="true"></span><span>{{.}}</span></div>{{end}}
 </article>
+{{- end}}
+
+{{define "authcard" -}}
+<div class="dw-authwrap">
+	<div class="dw-authcard">
+		<div class="dw-authmark"><span class="dw-glyph" aria-hidden="true"></span>DockWatch</div>
+		<p class="dw-authsub">{{.Sub}}</p>
+		<form class="dw-authbox" method="post" action="{{.Action}}" novalidate>
+			<h1>{{.Heading}}</h1>
+			{{if .Banner}}<div class="dw-formerr" role="alert">{{.Banner}}</div>{{end}}
+			{{range .Fields}}{{template "field" .}}{{end}}
+			<button class="dw-btnprimary dw-submit" type="submit">{{.Submit}}</button>
+		</form>
+		{{if .Foot}}<p class="dw-authfoot">{{.Foot}}</p>{{end}}
+	</div>
+</div>
 {{- end}}
 
 {{define "field" -}}
