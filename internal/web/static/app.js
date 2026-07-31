@@ -112,6 +112,9 @@
 	}
 	if (hostSel) hostSel.addEventListener("change", applyFilters);
 	if (statusSel) statusSel.addEventListener("change", applyFilters);
+	// Browsers restore select state across the check-now reload, so re-apply on
+	// load or the controls would show a filter the rows no longer reflect.
+	applyFilters();
 
 	// Check now: POST, then poll /check and reload once the cycle completes.
 	var checkBtn = document.querySelector("[data-dw-check]");
