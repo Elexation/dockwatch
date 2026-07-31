@@ -41,11 +41,13 @@ type Config struct {
 	TLSKey       string
 	Domain       string
 	TrustedProxy bool
-	RequireHTTPS bool
 	ResetAdmin   bool
 }
 
-func (c *Config) IsHub() bool   { return c.Mode == "hub" }
+// IsHub reports whether this process runs the hub role.
+func (c *Config) IsHub() bool { return c.Mode == "hub" }
+
+// IsAgent reports whether this process runs the agent role.
 func (c *Config) IsAgent() bool { return c.Mode == "agent" }
 
 var agentKeyRe = regexp.MustCompile(`^DW_AGENT_(.+)_URL$`)
@@ -55,7 +57,7 @@ var knownKeys = map[string]bool{
 	"DW_DOCKER_SOCK": true, "DW_LOCAL_NAME": true, "DW_INTERVAL": true,
 	"DW_NTFY_URL": true, "DW_NTFY_TOPIC": true, "DW_NTFY_TOKEN": true,
 	"DW_HTTPS": true, "DW_TLS_CERT": true, "DW_TLS_KEY": true, "DW_DOMAIN": true,
-	"DW_TRUSTED_PROXY": true, "DW_REQUIRE_HTTPS": true, "DW_RESET_ADMIN": true,
+	"DW_TRUSTED_PROXY": true, "DW_RESET_ADMIN": true,
 }
 
 // Load parses environ (entries of the form "KEY=value", as from os.Environ)
@@ -101,10 +103,6 @@ func Load(environ []string) (*Config, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	requireHTTPS, err := parseBool(env, "DW_REQUIRE_HTTPS", false)
-	if err != nil {
-		return nil, nil, err
-	}
 	resetAdmin, err := parseBool(env, "DW_RESET_ADMIN", false)
 	if err != nil {
 		return nil, nil, err
@@ -134,17 +132,13 @@ func Load(environ []string) (*Config, []string, error) {
 		TLSKey:       env["DW_TLS_KEY"],
 		Domain:       domain,
 		TrustedProxy: trustedProxy,
-		RequireHTTPS: requireHTTPS,
 		ResetAdmin:   resetAdmin,
 	}
 
-	// Transport cross-checks (SPEC 12); hub-only, as the agent ignores that section.
+	// Transport cross-checks; hub-only, as the agent ignores these vars.
 	if cfg.IsHub() {
 		if (cfg.TLSCert == "") != (cfg.TLSKey == "") {
 			return nil, nil, fmt.Errorf("DW_TLS_CERT and DW_TLS_KEY must both be set or both be unset")
-		}
-		if cfg.RequireHTTPS && !cfg.HTTPS && !cfg.TrustedProxy {
-			return nil, nil, fmt.Errorf("DW_REQUIRE_HTTPS=true requires DW_HTTPS=true or DW_TRUSTED_PROXY=true")
 		}
 	}
 

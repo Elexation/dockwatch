@@ -84,7 +84,6 @@ func TestFailFast(t *testing.T) {
 		{"bad bool", []string{"DW_HTTPS=maybe"}, "DW_HTTPS"},
 		{"tls cert only", []string{"DW_TLS_CERT=/c"}, "DW_TLS_CERT"},
 		{"tls key only", []string{"DW_TLS_KEY=/k"}, "DW_TLS_KEY"},
-		{"require https alone", []string{"DW_REQUIRE_HTTPS=true"}, "DW_REQUIRE_HTTPS"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,8 +126,8 @@ func TestValidOverrides(t *testing.T) {
 func TestTransportValidCombos(t *testing.T) {
 	cases := [][]string{
 		{"DW_NTFY_TOPIC=t", "DW_TLS_CERT=/c", "DW_TLS_KEY=/k"},
-		{"DW_NTFY_TOPIC=t", "DW_REQUIRE_HTTPS=true", "DW_HTTPS=true"},
-		{"DW_NTFY_TOPIC=t", "DW_REQUIRE_HTTPS=true", "DW_TRUSTED_PROXY=true"},
+		{"DW_NTFY_TOPIC=t", "DW_HTTPS=true"},
+		{"DW_NTFY_TOPIC=t", "DW_TRUSTED_PROXY=true"},
 	}
 	for _, env := range cases {
 		if _, _, err := Load(env); err != nil {
