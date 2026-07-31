@@ -18,7 +18,7 @@ const (
 	sessionCookie = "dw_session"
 	themeCookie   = "dw_theme"
 	layoutCookie  = "dw_layout"
-	defaultTTL    = 30 * 24 * time.Hour // sliding session lifetime (SPEC 11)
+	defaultTTL    = 30 * 24 * time.Hour // sliding session lifetime
 )
 
 // LocalReader is the dashboard's slice of inventory.Reader (an interface for testing).
@@ -44,7 +44,7 @@ type Config struct {
 	LastCycleDone    func() time.Time             // Scheduler.LastCycle
 	AgentInventories func() []inventory.Inventory // Poller.AgentInventories; last-known, not live
 
-	// Transport (SPEC 12), consumed by Serve.
+	// Transport, consumed by Serve.
 	Port         int    // listen port
 	HTTPS        bool   // DW_HTTPS: serve TLS behind the port-sharing redirect listener
 	TLSCert      string // DW_TLS_CERT; empty pairs with TLSKey to mean self-signed

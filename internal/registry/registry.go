@@ -15,7 +15,9 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 )
 
-// Sentinel errors let callers classify failures without inspecting the HTTP transport; each wraps the original error.
+// Sentinel errors let callers classify failures without inspecting the HTTP
+// transport. Each returned error wraps both the sentinel and the original, so
+// errors.Is reaches the sentinel and errors.As still reaches *transport.Error.
 var (
 	ErrAuthRequired = errors.New("registry requires authentication")
 	ErrRateLimited  = errors.New("registry rate limited")
@@ -96,11 +98,11 @@ func classify(err error) error {
 	if errors.As(err, &terr) {
 		switch terr.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
-			return fmt.Errorf("%w: %v", ErrAuthRequired, err)
+			return fmt.Errorf("%w: %w", ErrAuthRequired, err)
 		case http.StatusTooManyRequests:
-			return fmt.Errorf("%w: %v", ErrRateLimited, err)
+			return fmt.Errorf("%w: %w", ErrRateLimited, err)
 		case http.StatusNotFound:
-			return fmt.Errorf("%w: %v", ErrNotFound, err)
+			return fmt.Errorf("%w: %w", ErrNotFound, err)
 		}
 	}
 	return err

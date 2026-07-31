@@ -22,7 +22,7 @@ type CheckResult struct {
 	Ref            string `json:"ref"`                       // full reference, e.g. gitea/gitea:1.24.3
 	Kind           string `json:"kind"`                      // LOCAL | SEMVER | DIGEST
 	Current        string `json:"current,omitempty"`         // SEMVER: the running tag's version
-	Latest         string `json:"latest,omitempty"`          // SEMVER: newest same-scheme tag, when newer
+	Latest         string `json:"latest,omitempty"`          // SEMVER: newest tag matching TagFilter, when newer
 	UpdateKind     string `json:"update_kind,omitempty"`     // major | minor | patch, when computable
 	RegistryDigest string `json:"registry_digest,omitempty"` // registry index digest of the tag
 	TagFilter      string `json:"tag_filter,omitempty"`      // dw.tags regex in effect, "" = scheme heuristic
@@ -38,6 +38,7 @@ type CheckResult struct {
 	Err       string      `json:"err,omitempty"`
 }
 
+// PutCheck stores r under its reference, replacing any previous result.
 func (s *Store) PutCheck(r CheckResult) error {
 	data, err := json.Marshal(r)
 	if err != nil {
@@ -63,6 +64,7 @@ func (s *Store) GetCheck(ref string) (CheckResult, bool, error) {
 	return r, found, err
 }
 
+// AllChecks returns every stored check result, in reference order.
 func (s *Store) AllChecks() ([]CheckResult, error) {
 	var out []CheckResult
 	err := s.db.View(func(tx *bolt.Tx) error {

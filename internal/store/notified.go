@@ -16,6 +16,7 @@ type NotifiedState struct {
 	NotifiedAt time.Time `json:"notified_at"`
 }
 
+// PutNotified stores n under its reference, replacing any previous state.
 func (s *Store) PutNotified(n NotifiedState) error {
 	data, err := json.Marshal(n)
 	if err != nil {

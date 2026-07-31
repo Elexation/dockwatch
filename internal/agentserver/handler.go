@@ -9,8 +9,9 @@ import (
 )
 
 // newHandler builds the agent's single-route mux. The method-qualified pattern
-// makes a non-GET request to the route a 405 and every other path a 404, so no
-// surface beyond GET /v1/inventory is reachable.
+// makes every other path a 404 and any method other than GET or HEAD a 405
+// (ServeMux matches HEAD against a GET pattern), so the only reachable surface
+// is reading the inventory.
 func newHandler(reader *inventory.Reader, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/inventory", func(w http.ResponseWriter, r *http.Request) {

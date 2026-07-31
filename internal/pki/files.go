@@ -44,8 +44,8 @@ const (
 	OrphanedAgent EventKind = "orphaned-agent"
 )
 
-// Event is one notable thing Bootstrap did or noticed. Events feed logging now
-// and notifications (ntfy) later.
+// Event is one notable thing Bootstrap did or noticed. Every event is logged,
+// and the agent-facing kinds are turned into ntfy notifications by the caller.
 type Event struct {
 	Kind   EventKind
 	Name   string // agent name, when relevant
