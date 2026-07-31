@@ -118,8 +118,15 @@ func checkSemver(ctx context.Context, reg RegistryClient, ref, tag, filter strin
 		res.UpdateKind = kind
 	}
 
-	// Record the tag's digest too, to catch a republish; best-effort, so a hiccup here doesn't fail the check.
-	if dig, derr := reg.Digest(ctx, ref); derr == nil {
+	// Record the tag's digest too, to catch a republish. Best-effort, so a hiccup
+	// here doesn't fail the check, except for a 429: that has to reach the caller
+	// or the per-cycle cooldown never engages and the result caches as OK.
+	if dig, derr := reg.Digest(ctx, ref); derr != nil {
+		if errors.Is(derr, registry.ErrRateLimited) {
+			applyErr(res, derr)
+			return
+		}
+	} else {
 		res.RegistryDigest = dig
 	}
 	res.Status = store.StatusOK

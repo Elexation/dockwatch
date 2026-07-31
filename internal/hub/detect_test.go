@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +187,40 @@ func TestCheckRateLimited(t *testing.T) {
 	res := Check(context.Background(), reg, ref, "", time.Now())
 	if res.Status != store.StatusRateLimited {
 		t.Errorf("Status = %q, want rate-limited", res.Status)
+	}
+}
+
+func TestCheckSemverRateLimitedDigestSurfaces(t *testing.T) {
+	ref := "gitea/gitea:1.24.3"
+	repo, _ := repoOf(ref)
+	// Registries meter manifest fetches separately from tag listing, so the tag
+	// scan can succeed while the republish digest lookup is throttled.
+	reg := &fakeReg{
+		tags:   map[string][]string{repo: {"1.24.3", "1.25.0"}},
+		digErr: registry.ErrRateLimited,
+	}
+	res := Check(context.Background(), reg, ref, "", time.Now())
+	if res.Status != store.StatusRateLimited {
+		t.Errorf("Status = %q, want rate-limited; recording ok skips the cycle cooldown and caches past the next recheck", res.Status)
+	}
+	if res.Latest != "1.25.0" {
+		t.Errorf("Latest = %q, want the completed tag scan preserved", res.Latest)
+	}
+}
+
+func TestCheckSemverDigestHiccupStaysOK(t *testing.T) {
+	ref := "gitea/gitea:1.24.3"
+	repo, _ := repoOf(ref)
+	reg := &fakeReg{
+		tags:   map[string][]string{repo: {"1.24.3", "1.25.0"}},
+		digErr: errors.New("connection reset"),
+	}
+	res := Check(context.Background(), reg, ref, "", time.Now())
+	if res.Status != store.StatusOK {
+		t.Errorf("Status = %q, want ok; a transient digest error stays best-effort", res.Status)
+	}
+	if res.RegistryDigest != "" {
+		t.Errorf("RegistryDigest = %q, want empty", res.RegistryDigest)
 	}
 }
 
