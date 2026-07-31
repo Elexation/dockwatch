@@ -11,7 +11,8 @@ import (
 type AgentStatus struct {
 	Name                string    `json:"name"`
 	LastOK              bool      `json:"last_ok"`
-	LastPoll            time.Time `json:"last_poll"`
+	LastPoll            time.Time `json:"last_poll"`             // every poll, successful or not
+	LastSuccess         time.Time `json:"last_success,omitzero"` // last poll that actually reached the agent
 	ConsecutiveFailures int       `json:"consecutive_failures"`
 	DownNotified        bool      `json:"down_notified"`
 
@@ -22,6 +23,7 @@ type AgentStatus struct {
 	LastRenewalReminder time.Time `json:"last_renewal_reminder,omitempty"` // last weekly "bundle not installed" reminder
 }
 
+// PutAgent stores a under its name, replacing any previous status.
 func (s *Store) PutAgent(a AgentStatus) error {
 	data, err := json.Marshal(a)
 	if err != nil {
@@ -47,6 +49,7 @@ func (s *Store) GetAgent(name string) (AgentStatus, bool, error) {
 	return a, found, err
 }
 
+// AllAgents returns every stored agent status, in name order.
 func (s *Store) AllAgents() ([]AgentStatus, error) {
 	var out []AgentStatus
 	err := s.db.View(func(tx *bolt.Tx) error {
@@ -60,4 +63,32 @@ func (s *Store) AllAgents() ([]AgentStatus, error) {
 		})
 	})
 	return out, err
+}
+
+// PruneAgents drops stored statuses for agents no longer in keep and returns
+// the names removed. Status is rebuilt by the next poll, so dropping a
+// renamed or decommissioned agent costs nothing and stops it lingering on the
+// agents page and in the down-alert evaluation.
+func (s *Store) PruneAgents(keep []string) ([]string, error) {
+	set := make(map[string]bool, len(keep))
+	for _, n := range keep {
+		set[n] = true
+	}
+	var removed []string
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketAgents)
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if !set[string(k)] {
+				removed = append(removed, string(k))
+			}
+		}
+		for _, n := range removed {
+			if err := b.Delete([]byte(n)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return removed, err
 }

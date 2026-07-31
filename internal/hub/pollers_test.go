@@ -27,6 +27,15 @@ func (emptyLocal) Read(context.Context) (inventory.Inventory, error) {
 	return inventory.Inventory{V: inventory.WireVersion, Host: "local", Docker: inventory.DockerOK, Containers: []inventory.Container{}}, nil
 }
 
+// wedgedLocal stands in for a Docker daemon that accepts on the socket and then
+// never answers; the client sets no request timeout of its own.
+type wedgedLocal struct{}
+
+func (wedgedLocal) Read(ctx context.Context) (inventory.Inventory, error) {
+	<-ctx.Done()
+	return inventory.Inventory{V: inventory.WireVersion, Host: "local", Docker: inventory.DockerUnavailable}, ctx.Err()
+}
+
 // mtlsAgent starts an mTLS test server + a hub client that trusts it; SAN is 127.0.0.1 so the loopback URL verifies.
 func mtlsAgent(t *testing.T, handler http.Handler) (url string, client *http.Client) {
 	t.Helper()
@@ -114,6 +123,45 @@ func TestGatherAgentOverridesHost(t *testing.T) {
 	}
 	if !status.LastOK || status.ConsecutiveFailures != 0 {
 		t.Errorf("status = %+v, want LastOK and 0 failures", status)
+	}
+}
+
+func TestGatherLocalReadTimesOut(t *testing.T) {
+	st := openStore(t)
+	p := NewPoller(wedgedLocal{}, nil, nil, st, quietLogger())
+	p.localTimeout = 100 * time.Millisecond
+
+	done := make(chan []inventory.Inventory, 1)
+	go func() { done <- p.Gather(context.Background(), time.Now()) }()
+
+	select {
+	case invs := <-done:
+		if len(invs) != 1 {
+			t.Fatalf("got %d inventories, want 1 (degraded local)", len(invs))
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Gather never returned: a wedged local daemon stalls this and every later cycle")
+	}
+}
+
+func TestRecordAgentFailureKeepsLastSuccess(t *testing.T) {
+	st := openStore(t)
+	p := NewPoller(emptyLocal{}, nil, nil, st, quietLogger())
+
+	reached := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+	p.recordAgent("home", true, inventory.WireVersion, time.Time{}, reached)
+	attempted := time.Now().Truncate(time.Second)
+	p.recordAgent("home", false, 0, time.Time{}, attempted)
+
+	status, found, err := st.GetAgent("home")
+	if err != nil || !found {
+		t.Fatalf("GetAgent: found=%v err=%v", found, err)
+	}
+	if !status.LastPoll.Equal(attempted) {
+		t.Errorf("LastPoll = %v, want the failed attempt at %v", status.LastPoll, attempted)
+	}
+	if !status.LastSuccess.Equal(reached) {
+		t.Errorf("LastSuccess = %v, want the last poll that reached the agent at %v; the agents card labels this field successful", status.LastSuccess, reached)
 	}
 }
 

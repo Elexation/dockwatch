@@ -146,7 +146,7 @@ func BuildAgents(agents []store.AgentStatus, in AgentsInput) AgentsVM {
 	for _, a := range agents {
 		card := AgentCardVM{
 			Name:         a.Name,
-			LastPoll:     a.LastPoll,
+			LastSuccess:  a.LastSuccess,
 			CertNotAfter: a.CertNotAfter,
 		}
 		switch {

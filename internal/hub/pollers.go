@@ -16,7 +16,13 @@ import (
 	"github.com/elexation/dockwatch/internal/store"
 )
 
-const agentPollTimeout = 10 * time.Second
+const (
+	agentPollTimeout = 10 * time.Second
+	// localReadTimeout bounds the local socket read. The Docker client sets no
+	// request timeout on a unix socket, so a wedged daemon would otherwise block
+	// Gather forever and stall every later cycle.
+	localReadTimeout = 10 * time.Second
+)
 
 // Agent identifies one agent to poll; its own type keeps hub independent of config.
 type Agent struct {
@@ -33,12 +39,13 @@ var _ localReader = (*inventory.Reader)(nil)
 
 // Poller gathers the local and agent inventories; a slow or failed agent is dropped, never blocking the cycle.
 type Poller struct {
-	local       localReader
-	agents      []Agent
-	client      *http.Client
-	store       *store.Store
-	logger      *slog.Logger
-	pollTimeout time.Duration
+	local        localReader
+	agents       []Agent
+	client       *http.Client
+	store        *store.Store
+	logger       *slog.Logger
+	pollTimeout  time.Duration
+	localTimeout time.Duration
 
 	mu          sync.Mutex
 	lastByAgent map[string]inventory.Inventory
@@ -47,13 +54,14 @@ type Poller struct {
 // NewPoller builds a Poller; client may be nil only when agents is empty (local-only hub).
 func NewPoller(local localReader, agents []Agent, client *http.Client, st *store.Store, logger *slog.Logger) *Poller {
 	return &Poller{
-		local:       local,
-		agents:      agents,
-		client:      client,
-		store:       st,
-		logger:      logger,
-		pollTimeout: agentPollTimeout,
-		lastByAgent: make(map[string]inventory.Inventory),
+		local:        local,
+		agents:       agents,
+		client:       client,
+		store:        st,
+		logger:       logger,
+		pollTimeout:  agentPollTimeout,
+		localTimeout: localReadTimeout,
+		lastByAgent:  make(map[string]inventory.Inventory),
 	}
 }
 
@@ -98,7 +106,9 @@ func (p *Poller) Gather(ctx context.Context, now time.Time) []inventory.Inventor
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		inv, err := p.local.Read(ctx)
+		lctx, cancel := context.WithTimeout(ctx, p.localTimeout)
+		defer cancel()
+		inv, err := p.local.Read(lctx)
 		if err != nil {
 			p.logger.Warn("local docker read degraded", "err", err)
 		}
@@ -168,8 +178,10 @@ func (p *Poller) fetchAgent(ctx context.Context, a Agent) (inventory.Inventory, 
 }
 
 // recordAgent updates poll status; DownNotified is the notifier's gate, left
-// untouched. On an OK poll it records the agent's wire version and served-cert
-// expiry (the latter only when non-zero); a failed poll leaves both intact.
+// untouched. LastPoll stamps every attempt, LastSuccess only the ones that
+// reached the agent. On an OK poll it also records the agent's wire version and
+// served-cert expiry (the latter only when non-zero); a failed poll leaves both
+// intact.
 func (p *Poller) recordAgent(name string, ok bool, wireV int, certNotAfter, now time.Time) {
 	st, _, err := p.store.GetAgent(name)
 	if err != nil {
@@ -179,6 +191,7 @@ func (p *Poller) recordAgent(name string, ok bool, wireV int, certNotAfter, now 
 	st.LastPoll = now
 	st.LastOK = ok
 	if ok {
+		st.LastSuccess = now
 		st.ConsecutiveFailures = 0
 		st.LastWireV = wireV
 		if !certNotAfter.IsZero() {

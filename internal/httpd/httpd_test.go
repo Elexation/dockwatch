@@ -383,7 +383,7 @@ func TestAgentsPageDockerUnavailable(t *testing.T) {
 			return []inventory.Inventory{{V: 1, Host: "pi4", Docker: inventory.DockerUnavailable}}
 		}
 	})
-	if err := st.PutAgent(store.AgentStatus{Name: "pi4", LastOK: true, LastPoll: time.Now()}); err != nil {
+	if err := st.PutAgent(store.AgentStatus{Name: "pi4", LastOK: true, LastPoll: time.Now(), LastSuccess: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	cookie := loginSession(t, s, st)

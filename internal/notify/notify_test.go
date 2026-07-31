@@ -135,7 +135,7 @@ func TestDigestRepublishFiresPerNewDigest(t *testing.T) {
 	st := openStore(t)
 	n := f.notifier(st, "", nil)
 
-	in := UpdateInput{Ref: "nginx:latest", Current: "latest", RegistryDigest: "sha256:new", RunningDigest: "sha256:old", Hosts: []string{"home"}}
+	in := UpdateInput{Ref: "nginx:latest", Current: "latest", RegistryDigest: "sha256:new", StaleHosts: []string{"home"}, Hosts: []string{"home"}}
 	now := time.Now()
 
 	n.NotifyUpdates(context.Background(), []UpdateInput{in}, now)
@@ -167,7 +167,7 @@ func TestDigestNoNotifyWhenRunningIsCurrent(t *testing.T) {
 	n := f.notifier(st, "", nil)
 
 	// Registry digest equals what the operator already runs: nothing to report.
-	in := UpdateInput{Ref: "nginx:latest", Current: "latest", RegistryDigest: "sha256:same", RunningDigest: "sha256:same", Hosts: []string{"home"}}
+	in := UpdateInput{Ref: "nginx:latest", Current: "latest", RegistryDigest: "sha256:same", Hosts: []string{"home"}}
 	n.NotifyUpdates(context.Background(), []UpdateInput{in}, time.Now())
 	if f.count() != 0 {
 		t.Errorf("publishes = %d, want 0 (operator already current)", f.count())
@@ -183,7 +183,7 @@ func TestSemverNewerTagAndRepublishAreIndependent(t *testing.T) {
 	n := f.notifier(st, "", nil)
 
 	// A republish of the pinned tag with no newer tag: one republish message.
-	in := UpdateInput{Ref: "gitea/gitea:1.24.3", Current: "1.24.3", RegistryDigest: "sha256:rebuild", RunningDigest: "sha256:old", Hosts: []string{"home"}}
+	in := UpdateInput{Ref: "gitea/gitea:1.24.3", Current: "1.24.3", RegistryDigest: "sha256:rebuild", StaleHosts: []string{"home"}, Hosts: []string{"home"}}
 	n.NotifyUpdates(context.Background(), []UpdateInput{in}, time.Now())
 	if f.count() != 1 {
 		t.Fatalf("publishes = %d, want 1 (republish only)", f.count())
@@ -193,7 +193,7 @@ func TestSemverNewerTagAndRepublishAreIndependent(t *testing.T) {
 	}
 
 	// Now a newer tag appears alongside a further republish: two messages.
-	in2 := UpdateInput{Ref: "gitea/gitea:1.24.3", Current: "1.24.3", Latest: "1.25.0", UpdateKind: "minor", RegistryDigest: "sha256:rebuild2", RunningDigest: "sha256:old", Hosts: []string{"home"}}
+	in2 := UpdateInput{Ref: "gitea/gitea:1.24.3", Current: "1.24.3", Latest: "1.25.0", UpdateKind: "minor", RegistryDigest: "sha256:rebuild2", StaleHosts: []string{"home"}, Hosts: []string{"home"}}
 	n.NotifyUpdates(context.Background(), []UpdateInput{in2}, time.Now())
 	if f.count() != 3 {
 		t.Fatalf("publishes = %d, want 3 (one newer-tag + one republish added)", f.count())
@@ -359,6 +359,43 @@ func TestWireMismatchOncePerVersion(t *testing.T) {
 	}
 }
 
+func TestRepublishNamesOnlyStaleHosts(t *testing.T) {
+	f := newFakeNtfy(t)
+	st := openStore(t)
+	n := f.notifier(st, "", nil)
+
+	// local already runs the republished digest; only pi4 has work to do.
+	in := UpdateInput{Ref: "nginx:latest", Current: "latest", RegistryDigest: "sha256:new",
+		StaleHosts: []string{"pi4"}, Hosts: []string{"local", "pi4"}}
+	n.NotifyUpdates(context.Background(), []UpdateInput{in}, time.Now())
+
+	if f.count() != 1 {
+		t.Fatalf("publishes = %d, want 1 (republish)", f.count())
+	}
+	body := f.last().body
+	if !strings.Contains(body, "pi4") {
+		t.Errorf("body = %q, want the host running the older digest named", body)
+	}
+	if strings.Contains(body, "local") {
+		t.Errorf("body = %q, must not name a host already on the new digest", body)
+	}
+}
+
+func TestRepublishSilentWhenEveryHostCurrent(t *testing.T) {
+	f := newFakeNtfy(t)
+	st := openStore(t)
+	n := f.notifier(st, "", nil)
+
+	// The registry moved, but every host already pulled it.
+	in := UpdateInput{Ref: "nginx:latest", Current: "latest", RegistryDigest: "sha256:new",
+		Hosts: []string{"local", "pi4"}}
+	n.NotifyUpdates(context.Background(), []UpdateInput{in}, time.Now())
+
+	if f.count() != 0 {
+		t.Errorf("publishes = %d, want 0 when no host runs an older digest", f.count())
+	}
+}
+
 func TestCertReminderWeeklyCadence(t *testing.T) {
 	f := newFakeNtfy(t)
 	st := openStore(t)
@@ -411,6 +448,43 @@ func TestCertReminderSilentWhenInstalled(t *testing.T) {
 	}
 }
 
+func TestCertReminderGateClearsOnInstall(t *testing.T) {
+	f := newFakeNtfy(t)
+	st := openStore(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	served := base.Add(30 * 24 * time.Hour)
+	staged := base.Add(3650 * 24 * time.Hour)
+
+	n := f.notifier(st, "", func(string) (time.Time, bool) { return staged, true })
+	if err := st.PutAgent(store.AgentStatus{Name: "home", LastOK: true, CertNotAfter: served}); err != nil {
+		t.Fatal(err)
+	}
+	n.NotifyAgents(context.Background(), base)
+
+	a, _, err := st.GetAgent("home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.LastRenewalReminder.IsZero() {
+		t.Fatal("reminder timestamp not recorded")
+	}
+
+	// Operator copies the bundle over and restarts: the agent now serves it.
+	a.CertNotAfter = staged
+	if err := st.PutAgent(a); err != nil {
+		t.Fatal(err)
+	}
+	n.NotifyAgents(context.Background(), base.Add(time.Hour))
+
+	a, _, err = st.GetAgent("home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.LastRenewalReminder.IsZero() {
+		t.Errorf("LastRenewalReminder = %v, want cleared; it drives the agents-page warn flag, which would otherwise stay lit forever", a.LastRenewalReminder)
+	}
+}
+
 func TestCertEventMessages(t *testing.T) {
 	f := newFakeNtfy(t)
 	st := openStore(t)
@@ -427,7 +501,7 @@ func TestCertEventMessages(t *testing.T) {
 		t.Errorf("reminted body = %q, want mention of address change", got)
 	}
 
-	n.NotifyCAKeyMissing(ctx, "bundle for agent \"home\"")
+	n.NotifyCAKeyMissing(ctx, []string{"bundle for agent \"home\""})
 	last := f.last()
 	if got := last.hdr.Get("Priority"); got != "4" {
 		t.Errorf("ca-key Priority = %q, want 4", got)

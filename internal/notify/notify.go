@@ -26,16 +26,17 @@ const (
 type UpdateInput struct {
 	Ref            string
 	Current        string   // running tag, e.g. "1.24.3" or "latest"
-	Latest         string   // newest same-scheme tag when one exists; "" otherwise
+	Latest         string   // newest tag matching the dw.tags filter, or the scheme heuristic when unset; "" if none
 	UpdateKind     string   // major | minor | patch, when computable
 	RegistryDigest string   // registry index digest of the current tag
-	RunningDigest  string   // index digest the operator is actually running
+	StaleHosts     []string // hosts whose running index digest differs from RegistryDigest
 	Hosts          []string // hosts running this reference
 }
 
-// Notifier turns detection and lifecycle facts into ntfy messages with
-// notify-once semantics, persisting in the store what the operator has already
-// been told so nothing repeats.
+// Notifier turns detection and lifecycle facts into ntfy messages, persisting
+// in the store what the operator has already been told so a fact is announced
+// once. The one deliberate exception is the weekly reminder that a renewed
+// bundle is staged but not installed, which repeats until the condition clears.
 type Notifier struct {
 	client *Client
 	store  *store.Store
@@ -61,10 +62,10 @@ func NewNotifier(client *Client, st *store.Store, logger *slog.Logger, domain st
 }
 
 // NotifyUpdates evaluates each reference for two independent, once-each signals:
-// a newer same-scheme tag, and a republish of the current tag (its registry
-// index digest moving past both the running digest and the last one notified).
-// A signal advances the stored state only after its message is delivered, so a
-// delivery failure simply retries on the next cycle.
+// a newer matching tag, and a republish of the current tag (its registry index
+// digest moving past the last one notified while at least one host still runs
+// an older digest). A signal advances the stored state only after its message
+// is delivered, so a delivery failure simply retries on the next cycle.
 func (n *Notifier) NotifyUpdates(ctx context.Context, inputs []UpdateInput, now time.Time) {
 	if !n.client.Enabled() {
 		return
@@ -86,7 +87,7 @@ func (n *Notifier) NotifyUpdates(ctx context.Context, inputs []UpdateInput, now 
 				changed = true
 			}
 		}
-		if in.RegistryDigest != "" && in.RegistryDigest != in.RunningDigest && in.RegistryDigest != prev.Digest {
+		if in.RegistryDigest != "" && len(in.StaleHosts) > 0 && in.RegistryDigest != prev.Digest {
 			if n.publish(ctx, n.republishMessage(in)) {
 				state.Digest = in.RegistryDigest
 				state.NotifiedAt = now
@@ -145,13 +146,21 @@ func (n *Notifier) agentTransitions(ctx context.Context, a store.AgentStatus, no
 	}
 
 	if a.LastOK && n.stagedExpiry != nil {
-		if staged, ok := n.stagedExpiry(a.Name); ok && !a.CertNotAfter.IsZero() && a.CertNotAfter.Before(staged) {
+		staged, ok := n.stagedExpiry(a.Name)
+		pending := ok && !a.CertNotAfter.IsZero() && a.CertNotAfter.Before(staged)
+		switch {
+		case pending:
 			if a.LastRenewalReminder.IsZero() || now.Sub(a.LastRenewalReminder) >= renewalReminderEvery {
 				if n.publish(ctx, certReminderMessage(a.Name)) {
 					a.LastRenewalReminder = now
 					changed = true
 				}
 			}
+		case !a.LastRenewalReminder.IsZero():
+			// Agent now serves the staged cert: clear the gate, or the reminder
+			// timestamp keeps the agents-page warn flag lit forever.
+			a.LastRenewalReminder = time.Time{}
+			changed = true
 		}
 	}
 
@@ -183,11 +192,13 @@ func (n *Notifier) NotifyBundleRemintedSAN(ctx context.Context, agent string) {
 }
 
 // NotifyCAKeyMissing alerts that minting is blocked because the CA key is
-// absent; detail names what could not be completed.
-func (n *Notifier) NotifyCAKeyMissing(ctx context.Context, detail string) {
-	n.publish(ctx, Message{
+// absent; details name everything that could not be completed. It reports
+// whether the message was delivered, so the caller can gate it to once per
+// occurrence of the condition rather than once per renewal pass.
+func (n *Notifier) NotifyCAKeyMissing(ctx context.Context, details []string) bool {
+	return n.publish(ctx, Message{
 		Title:    "CA key required",
-		Body:     "DockWatch needs the CA key to mint certificates but it is absent: " + detail + ". Restore ca.key.",
+		Body:     "DockWatch needs the CA key to mint certificates but it is absent: " + strings.Join(details, "; ") + ". Restore ca.key.",
 		Priority: PriorityHigh,
 		Tags:     []string{"rotating_light"},
 	})
@@ -227,11 +238,13 @@ func (n *Notifier) updateMessage(in UpdateInput) Message {
 	}
 }
 
+// republishMessage names only the hosts actually running an older digest; a
+// host already on the new one has nothing to do and should not be listed.
 func (n *Notifier) republishMessage(in UpdateInput) Message {
 	name := imageName(in.Ref)
-	body := fmt.Sprintf("%s republished on %s", name, hostList(in.Hosts))
+	body := fmt.Sprintf("%s republished on %s", name, hostList(in.StaleHosts))
 	if in.Current != "" {
-		body = fmt.Sprintf("%s %s republished on %s", name, in.Current, hostList(in.Hosts))
+		body = fmt.Sprintf("%s %s republished on %s", name, in.Current, hostList(in.StaleHosts))
 	}
 	return Message{
 		Title: name + " republished",

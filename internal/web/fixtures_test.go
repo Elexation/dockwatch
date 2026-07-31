@@ -186,10 +186,12 @@ func stressDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 
 func sampleAgents() ([]store.AgentStatus, AgentsInput) {
 	agents := []store.AgentStatus{
-		{Name: "server", LastOK: true, LastPoll: ago(time.Minute), CertNotAfter: date(2026, 8, 19), LastWireV: 2},
-		{Name: "backup", LastOK: true, LastPoll: ago(5 * time.Minute), CertNotAfter: date(2031, 3, 4), LastRenewalReminder: ago(24 * time.Hour)},
-		{Name: "pi4", LastOK: false, LastPoll: ago(2 * time.Hour), CertNotAfter: date(2030, 11, 22)},
-		{Name: "nas", LastOK: true, LastPoll: ago(41 * time.Minute), CertNotAfter: date(2031, 1, 15)},
+		{Name: "server", LastOK: true, LastPoll: ago(time.Minute), LastSuccess: ago(time.Minute), CertNotAfter: date(2026, 8, 19), LastWireV: 2},
+		{Name: "backup", LastOK: true, LastPoll: ago(5 * time.Minute), LastSuccess: ago(5 * time.Minute), CertNotAfter: date(2031, 3, 4), LastRenewalReminder: ago(24 * time.Hour)},
+		// Down since well before the last attempt: the card must show the age of
+		// the last success, not of the failing poll.
+		{Name: "pi4", LastOK: false, LastPoll: ago(time.Minute), LastSuccess: ago(2 * time.Hour), CertNotAfter: date(2030, 11, 22)},
+		{Name: "nas", LastOK: true, LastPoll: ago(41 * time.Minute), LastSuccess: ago(41 * time.Minute), CertNotAfter: date(2031, 1, 15)},
 	}
 	in := AgentsInput{
 		Theme:            "dark",

@@ -1,5 +1,9 @@
-// Package store persists the hub's check results and agent poll status in a
-// disposable bbolt file, rebuilt from scratch if lost.
+// Package store persists the hub's state in a single bbolt file. Most of it is
+// cache that rebuilds itself: check results, agent poll status, and what the
+// operator has already been notified about. The auth and sessions buckets are
+// not. Deleting the file also destroys the admin record, which re-arms the
+// unauthenticated first-run setup page; DW_RESET_ADMIN is the intended way to
+// reset the admin account.
 package store
 
 import (
@@ -27,8 +31,10 @@ var (
 	bucketNotified = []byte("notified")
 	bucketAuth     = []byte("auth")
 	bucketSessions = []byte("sessions")
+	bucketMeta     = []byte("meta")
 )
 
+// Store is an open handle on the hub's bbolt database.
 type Store struct {
 	db *bolt.DB
 }
@@ -44,7 +50,7 @@ func Open(dir string) (*Store, error) {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bucketChecks, bucketAgents, bucketNotified, bucketAuth, bucketSessions} {
+		for _, b := range [][]byte{bucketChecks, bucketAgents, bucketNotified, bucketAuth, bucketSessions, bucketMeta} {
 			if _, berr := tx.CreateBucketIfNotExists(b); berr != nil {
 				return berr
 			}
@@ -58,6 +64,7 @@ func Open(dir string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// Close releases the database file lock.
 func (s *Store) Close() error {
 	return s.db.Close()
 }

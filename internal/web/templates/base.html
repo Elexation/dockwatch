@@ -158,7 +158,7 @@
 		<span class="aname">{{.Name}}</span>
 		<span class="dw-tone dw-reach {{.ReachClass}}"><span class="dw-dot rd" aria-hidden="true"></span>{{.ReachLabel}}</span>
 	</div>
-	<div class="arow"><span class="al">Last successful poll</span><span class="av">{{reltimeOrDash .LastPoll}}</span></div>
+	<div class="arow"><span class="al">Last successful poll</span><span class="av">{{reltimeOrDash .LastSuccess}}</span></div>
 	<div class="arow"><span class="al">Certificate</span><span class="av mono">{{expiryDate .CertNotAfter}}</span></div>
 	{{range .Flags}}<div class="dw-tone dw-aflag warn"><span class="dw-dot fdot" aria-hidden="true"></span><span>{{.}}</span></div>{{end}}
 </article>

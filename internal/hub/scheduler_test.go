@@ -33,6 +33,57 @@ func (f fixedLocal) Read(context.Context) (inventory.Inventory, error) {
 	return inventory.Inventory{V: inventory.WireVersion, Host: "local", Docker: inventory.DockerOK, Containers: f.containers}, nil
 }
 
+func TestDedupTracksDigestPerHost(t *testing.T) {
+	st := openStore(t)
+	p := NewPoller(emptyLocal{}, nil, nil, st, quietLogger())
+	s := NewScheduler(p, &fakeReg{}, st, quietLogger(), time.Hour, nil, nil)
+
+	// Same tag on two hosts, pulled at different times.
+	invs := []inventory.Inventory{
+		{Host: "local", Containers: []inventory.Container{
+			{Name: "nginx", Image: "nginx:latest", State: "running", RepoDigests: []string{"nginx@sha256:new"}},
+		}},
+		{Host: "pi4", Containers: []inventory.Container{
+			{Name: "nginx", Image: "nginx:latest", State: "running", RepoDigests: []string{"nginx@sha256:old"}},
+		}},
+	}
+	agg := s.dedup(invs)["nginx:latest"]
+	if agg == nil {
+		t.Fatal("nginx:latest missing from dedup")
+	}
+
+	got := agg.staleHosts("sha256:new")
+	if len(got) != 1 || got[0] != "pi4" {
+		t.Errorf("staleHosts = %v, want [pi4]; naming a host already on the new digest sends it to do nothing", got)
+	}
+	if got := agg.staleHosts("sha256:newer"); len(got) != 2 {
+		t.Errorf("staleHosts = %v, want both hosts once the registry moves past both", got)
+	}
+	if got := agg.staleHosts(""); len(got) != 0 {
+		t.Errorf("staleHosts = %v, want none when the registry digest is unknown", got)
+	}
+}
+
+func TestStaleHostsSkipsUnreadableDigest(t *testing.T) {
+	st := openStore(t)
+	p := NewPoller(emptyLocal{}, nil, nil, st, quietLogger())
+	s := NewScheduler(p, &fakeReg{}, st, quietLogger(), time.Hour, nil, nil)
+
+	// pi4 reports no repo digest (a containerd-store host): unknown, not stale.
+	invs := []inventory.Inventory{
+		{Host: "local", Containers: []inventory.Container{
+			{Name: "nginx", Image: "nginx:latest", State: "running", RepoDigests: []string{"nginx@sha256:new"}},
+		}},
+		{Host: "pi4", Containers: []inventory.Container{
+			{Name: "nginx", Image: "nginx:latest", State: "running"},
+		}},
+	}
+	agg := s.dedup(invs)["nginx:latest"]
+	if got := agg.staleHosts("sha256:new"); len(got) != 0 {
+		t.Errorf("staleHosts = %v, want none; an unreadable running digest must not read as stale", got)
+	}
+}
+
 func TestMergeGate(t *testing.T) {
 	st := openStore(t)
 	p := NewPoller(emptyLocal{}, nil, nil, st, quietLogger())

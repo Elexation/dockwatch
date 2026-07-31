@@ -80,7 +80,7 @@ func TestAgentRoundTrip(t *testing.T) {
 	s := openTemp(t)
 	now := time.Now().Truncate(time.Second)
 	want := AgentStatus{
-		Name: "home", LastOK: true, LastPoll: now, ConsecutiveFailures: 0, DownNotified: false,
+		Name: "home", LastOK: true, LastPoll: now, LastSuccess: now, ConsecutiveFailures: 0, DownNotified: false,
 		LastWireV: 1, WireNotifiedV: 2, CertNotAfter: now.Add(time.Hour), LastRenewalReminder: now,
 	}
 	if err := s.PutAgent(want); err != nil {
@@ -90,12 +90,78 @@ func TestAgentRoundTrip(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("GetAgent: found=%v err=%v", found, err)
 	}
-	if got.LastOK != want.LastOK || got.ConsecutiveFailures != want.ConsecutiveFailures || !got.LastPoll.Equal(want.LastPoll) {
+	if got.LastOK != want.LastOK || got.ConsecutiveFailures != want.ConsecutiveFailures ||
+		!got.LastPoll.Equal(want.LastPoll) || !got.LastSuccess.Equal(want.LastSuccess) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 	if got.LastWireV != want.LastWireV || got.WireNotifiedV != want.WireNotifiedV ||
 		!got.CertNotAfter.Equal(want.CertNotAfter) || !got.LastRenewalReminder.Equal(want.LastRenewalReminder) {
 		t.Errorf("new fields not round-tripped: got %+v, want %+v", got, want)
+	}
+}
+
+func TestPruneAgents(t *testing.T) {
+	s := openTemp(t)
+	for _, n := range []string{"home", "pi", "nas"} {
+		if err := s.PutAgent(AgentStatus{Name: n, LastOK: true}); err != nil {
+			t.Fatalf("PutAgent %s: %v", n, err)
+		}
+	}
+
+	// "pi" was renamed to "pi4" in the config and never polled under the old name.
+	removed, err := s.PruneAgents([]string{"home", "nas", "pi4"})
+	if err != nil {
+		t.Fatalf("PruneAgents: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != "pi" {
+		t.Errorf("removed = %v, want [pi]", removed)
+	}
+	if _, found, _ := s.GetAgent("pi"); found {
+		t.Error("pi still stored; its card would linger on the agents page")
+	}
+	for _, n := range []string{"home", "nas"} {
+		if _, found, _ := s.GetAgent(n); !found {
+			t.Errorf("%s was pruned but is still configured", n)
+		}
+	}
+
+	// A configured agent with no stored status yet is not an error.
+	if removed, err := s.PruneAgents([]string{"home", "nas", "pi4"}); err != nil || len(removed) != 0 {
+		t.Errorf("second prune: removed=%v err=%v, want none", removed, err)
+	}
+}
+
+func TestPruneAgentsEmptyConfigClearsAll(t *testing.T) {
+	s := openTemp(t)
+	if err := s.PutAgent(AgentStatus{Name: "home"}); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := s.PruneAgents(nil)
+	if err != nil || len(removed) != 1 {
+		t.Fatalf("removed=%v err=%v, want [home]", removed, err)
+	}
+	all, err := s.AllAgents()
+	if err != nil || len(all) != 0 {
+		t.Errorf("AllAgents = %v (err %v), want empty", all, err)
+	}
+}
+
+func TestCAKeyMissingGate(t *testing.T) {
+	s := openTemp(t)
+	if set, err := s.CAKeyMissingNotified(); err != nil || set {
+		t.Fatalf("fresh store: notified=%v err=%v, want false", set, err)
+	}
+	if err := s.SetCAKeyMissingNotified(true); err != nil {
+		t.Fatal(err)
+	}
+	if set, err := s.CAKeyMissingNotified(); err != nil || !set {
+		t.Errorf("after set: notified=%v err=%v, want true", set, err)
+	}
+	if err := s.SetCAKeyMissingNotified(false); err != nil {
+		t.Fatal(err)
+	}
+	if set, err := s.CAKeyMissingNotified(); err != nil || set {
+		t.Errorf("after clear: notified=%v err=%v, want false", set, err)
 	}
 }
 

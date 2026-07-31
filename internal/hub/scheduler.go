@@ -231,7 +231,7 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 				Latest:         res.Latest,
 				UpdateKind:     res.UpdateKind,
 				RegistryDigest: res.RegistryDigest,
-				RunningDigest:  agg.runningDigest,
+				StaleHosts:     agg.staleHosts(res.RegistryDigest),
 				Hosts:          agg.hosts,
 			})
 		}
@@ -271,15 +271,34 @@ func (s *Scheduler) stampRepublished(ctx context.Context, ref string, prev store
 // refAgg collects, per image reference, the facts the notifier joins across all
 // hosts running it.
 type refAgg struct {
-	kind          Kind
-	runningDigest string
-	hosts         []string
-	tagFilter     string // dw.tags label; smallest non-empty value wins on conflict
+	kind Kind
+	// byHost is each host's running index digest. Hosts pulling the same tag at
+	// different times hold different digests, so the republish join needs all of
+	// them, not one representative. A host with no readable repo_digest is
+	// absent, which reads as unknown rather than stale.
+	byHost    map[string]string
+	hosts     []string
+	tagFilter string // dw.tags label; smallest non-empty value wins on conflict
+}
+
+// staleHosts returns the hosts whose running digest differs from the registry's
+// current index digest, in host order.
+func (a *refAgg) staleHosts(registryDigest string) []string {
+	if registryDigest == "" {
+		return nil
+	}
+	var out []string
+	for _, h := range a.hosts {
+		if dig, ok := a.byHost[h]; ok && dig != registryDigest {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // dedup collapses running, watched containers to unique image refs, accumulating
-// the hosts, a running digest, and the dw.tags filter per ref; a checkable
-// classification beats LOCAL when a ref appears as both.
+// the hosts, each host's running digest, and the dw.tags filter per ref; a
+// checkable classification beats LOCAL when a ref appears as both.
 func (s *Scheduler) dedup(invs []inventory.Inventory) map[string]*refAgg {
 	out := make(map[string]*refAgg)
 	for _, inv := range invs {
@@ -289,16 +308,16 @@ func (s *Scheduler) dedup(invs []inventory.Inventory) map[string]*refAgg {
 			}
 			agg, ok := out[c.Image]
 			if !ok {
-				agg = &refAgg{kind: Classify(c)}
+				agg = &refAgg{kind: Classify(c), byHost: make(map[string]string)}
 				out[c.Image] = agg
 			} else if agg.kind == KindLocal {
 				agg.kind = Classify(c)
 			}
 			if inv.Host != "" {
 				agg.hosts = appendUnique(agg.hosts, inv.Host)
-			}
-			if agg.runningDigest == "" {
-				agg.runningDigest = runningDigest(c, c.Image)
+				if dig := runningDigest(c, c.Image); dig != "" {
+					agg.byHost[inv.Host] = dig
+				}
 			}
 			if f := c.Labels["dw.tags"]; f != "" && f != agg.tagFilter {
 				if agg.tagFilter == "" {

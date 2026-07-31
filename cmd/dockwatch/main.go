@@ -76,7 +76,7 @@ func run() {
 	}
 }
 
-// health is the container HEALTHCHECK command (SPEC 15): it confirms this process
+// health is the container HEALTHCHECK command: it confirms this process
 // is serving and exits 0 on success, non-zero otherwise. The hub pings its own
 // /healthz over loopback; the agent, which exposes only an mTLS route, is probed
 // by a bare TCP connect to its listener.
@@ -148,13 +148,38 @@ func runHub(cfg *config.Config) {
 		}
 	}
 
+	// Setup is open to whoever reaches the port first, so say so on every start.
+	// On a genuine first run this is the prompt; afterwards it is the signal that
+	// something (a deleted database, DW_RESET_ADMIN) reopened it.
+	if exists, aerr := st.AdminExists(); aerr != nil {
+		slog.Error("read admin account", "err", aerr)
+		os.Exit(1)
+	} else if !exists {
+		slog.Warn("no admin account: first-run setup is open on this port until one is created")
+	}
+
+	// Config is the source of truth for which agents exist; stored status for a
+	// renamed or removed one would otherwise linger on the agents page and keep
+	// being evaluated for down alerts.
+	names := make([]string, 0, len(cfg.Agents))
+	for _, a := range cfg.Agents {
+		names = append(names, a.Name)
+	}
+	if dropped, perr := st.PruneAgents(names); perr != nil {
+		slog.Warn("prune stored agent status", "err", perr)
+	} else {
+		for _, n := range dropped {
+			slog.Info("dropped stored status for agent no longer configured", "agent", n)
+		}
+	}
+
 	// Build the notifier before Bootstrap so a startup cert renewal/remint can
 	// notify. It no-ops when DW_NTFY_TOPIC is unset, so building it is always safe.
 	ntfy := notify.NewClient(cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, nil)
 	notifier := notify.NewNotifier(ntfy, st, logger, cfg.Domain, stagedExpiry(cfg.CertsDir))
 
 	events, err := pki.Bootstrap(cfg.CertsDir, refs, time.Now())
-	handleCertEvents(context.Background(), events, notifier)
+	handleCertEvents(context.Background(), events, notifier, st)
 	if err != nil {
 		slog.Error("PKI bootstrap failed", "err", err)
 		os.Exit(1)
@@ -185,7 +210,7 @@ func runHub(cfg *config.Config) {
 	// renew re-runs the startup minting/renewal rules; the scheduler calls it daily.
 	renew := func() {
 		ev, rerr := pki.Bootstrap(cfg.CertsDir, refs, time.Now())
-		handleCertEvents(context.Background(), ev, notifier)
+		handleCertEvents(context.Background(), ev, notifier, st)
 		if rerr != nil {
 			slog.Error("cert renewal failed", "err", rerr)
 		}
@@ -197,7 +222,7 @@ func runHub(cfg *config.Config) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Web UI: plain HTTP, or TLS behind a port-sharing redirect listener (SPEC 12).
+	// Web UI: plain HTTP, or TLS behind a port-sharing redirect listener.
 	renderer, err := web.NewRenderer()
 	if err != nil {
 		slog.Error("init web renderer", "err", err)
@@ -298,8 +323,11 @@ func stagedExpiry(certsDir string) func(agent string) (time.Time, bool) {
 // handleCertEvents logs every PKI event and turns the agent-facing ones into
 // notifications. The hub's own client-cert renewal (Name=="") stays log-only:
 // agents verify the CA chain, not the specific cert, so no operator action is
-// needed.
-func handleCertEvents(ctx context.Context, events []pki.Event, n *notify.Notifier) {
+// needed. CA-key-missing is a standing condition rather than a one-off event,
+// re-emitted by every daily renewal pass while the key is away, so it is
+// collapsed into one message and gated on stored state.
+func handleCertEvents(ctx context.Context, events []pki.Event, n *notify.Notifier, st *store.Store) {
+	var caKeyMissing []string
 	for _, e := range events {
 		logEvent(e)
 		switch e.Kind {
@@ -310,7 +338,25 @@ func handleCertEvents(ctx context.Context, events []pki.Event, n *notify.Notifie
 		case pki.RemintedSAN:
 			n.NotifyBundleRemintedSAN(ctx, e.Name)
 		case pki.CAKeyMissing:
-			n.NotifyCAKeyMissing(ctx, e.Detail)
+			caKeyMissing = append(caKeyMissing, e.Detail)
+		}
+	}
+
+	notified, err := st.CAKeyMissingNotified()
+	if err != nil {
+		slog.Warn("read ca-key-missing gate", "err", err)
+		return
+	}
+	switch {
+	case len(caKeyMissing) > 0 && !notified:
+		if n.NotifyCAKeyMissing(ctx, caKeyMissing) {
+			if serr := st.SetCAKeyMissingNotified(true); serr != nil {
+				slog.Warn("persist ca-key-missing gate", "err", serr)
+			}
+		}
+	case len(caKeyMissing) == 0 && notified:
+		if serr := st.SetCAKeyMissingNotified(false); serr != nil {
+			slog.Warn("clear ca-key-missing gate", "err", serr)
 		}
 	}
 }

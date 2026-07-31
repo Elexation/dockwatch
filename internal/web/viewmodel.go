@@ -1,3 +1,7 @@
+// Package web is the hub's render layer: it maps inventories and stored check
+// results into view models and renders the embedded templates and static
+// assets. It is render-only and deliberately depends on inventory and store
+// alone; HTTP serving, sessions, and auth live in package httpd.
 package web
 
 import (
@@ -13,7 +17,7 @@ import (
 type DisplayState int
 
 const (
-	StateUpdate      DisplayState = iota // a newer same-scheme tag exists
+	StateUpdate      DisplayState = iota // a newer tag matching the dw.tags filter (or the scheme heuristic) exists
 	StateRepublished                     // the pinned tag's registry index digest moved
 	StateChecking                        // live, JS-only; the builder never emits it
 	StateRate                            // registry rate-limited the check
@@ -96,7 +100,7 @@ type AgentCardVM struct {
 	Name         string
 	ReachClass   string // "ok", "down", or "nodocker"
 	ReachLabel   string // "reachable", "unreachable", or "Docker unavailable"
-	LastPoll     time.Time
+	LastSuccess  time.Time
 	CertNotAfter time.Time
 	Flags        []string // warn-flag texts
 }
