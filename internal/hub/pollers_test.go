@@ -165,6 +165,25 @@ func TestRecordAgentFailureKeepsLastSuccess(t *testing.T) {
 	}
 }
 
+func TestRecordAgentReportsStreakAndRecovery(t *testing.T) {
+	st := openStore(t)
+	p := NewPoller(emptyLocal{}, nil, nil, st, quietLogger())
+	now := time.Now()
+
+	if fails, recovered := p.recordAgent("home", false, 0, time.Time{}, now); fails != 1 || recovered {
+		t.Errorf("first failure: fails=%d recovered=%v, want 1/false", fails, recovered)
+	}
+	if fails, _ := p.recordAgent("home", false, 0, time.Time{}, now); fails != 2 {
+		t.Errorf("second failure: fails=%d, want 2", fails)
+	}
+	if fails, recovered := p.recordAgent("home", true, inventory.WireVersion, time.Time{}, now); fails != 2 || !recovered {
+		t.Errorf("recovery: fails=%d recovered=%v, want the ended streak of 2 and true", fails, recovered)
+	}
+	if fails, recovered := p.recordAgent("home", true, inventory.WireVersion, time.Time{}, now); fails != 0 || recovered {
+		t.Errorf("steady state: fails=%d recovered=%v, want 0/false; a healthy poll must stay silent", fails, recovered)
+	}
+}
+
 func TestGatherAgentDownIncrementsFailures(t *testing.T) {
 	st := openStore(t)
 

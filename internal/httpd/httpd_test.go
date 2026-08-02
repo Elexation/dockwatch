@@ -377,6 +377,38 @@ func TestDashboardIncludesAgentRows(t *testing.T) {
 	}
 }
 
+func TestDashboardMarksUnreachableAgentStale(t *testing.T) {
+	agentInv := inventory.Inventory{
+		V: 1, Host: "pi4", Docker: inventory.DockerOK,
+		Containers: []inventory.Container{
+			{Name: "gitea-remote", Image: "gitea/gitea:1.24.3", State: "running", RepoDigests: []string{"gitea/gitea@sha256:aaa"}},
+		},
+	}
+	s, st := newTestServerWith(t, false, func(c *Config) {
+		c.AgentInventories = func() []inventory.Inventory { return []inventory.Inventory{agentInv} }
+	})
+	// The poller keeps serving the last-known inventory of a down agent, so the
+	// rows survive the failed poll and must say so.
+	if err := st.PutAgent(store.AgentStatus{
+		Name: "pi4", LastOK: false, LastPoll: time.Now(),
+		LastSuccess: time.Now().Add(-3 * time.Hour), ConsecutiveFailures: 4,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cookie := loginSession(t, s, st)
+
+	rec := do(s, "GET", "/", nil, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /: code=%d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"gitea-remote", "unreachable", "last seen 3h ago", `class="dw-row stale"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard missing %q for the unreachable agent", want)
+		}
+	}
+}
+
 func TestAgentsPageDockerUnavailable(t *testing.T) {
 	s, st := newTestServerWith(t, false, func(c *Config) {
 		c.AgentInventories = func() []inventory.Inventory {

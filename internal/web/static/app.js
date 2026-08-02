@@ -123,13 +123,15 @@
 		checking = true;
 		root.setAttribute("data-checking", "");
 		if (checkBtn) checkBtn.disabled = true;
-		var vers = document.querySelectorAll(".dw-ver");
+		// Stale rows belong to an unreachable host: the cycle cannot refresh them,
+		// and their time cell is a last-seen stamp, so leave both alone.
+		var vers = document.querySelectorAll(".dw-row:not(.stale) .dw-ver");
 		for (var i = 0; i < vers.length; i++) {
 			vers[i].className = "dw-ver dw-checking";
 			vers[i].setAttribute("aria-live", "polite");
 			vers[i].textContent = "checking…";
 		}
-		var times = document.querySelectorAll(".dw-time");
+		var times = document.querySelectorAll(".dw-row:not(.stale) .dw-time");
 		for (var j = 0; j < times.length; j++) times[j].textContent = "…";
 		var hups = document.querySelectorAll(".hup");
 		for (var k = 0; k < hups.length; k++) hups[k].hidden = true;

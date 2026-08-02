@@ -68,7 +68,8 @@ func NewPoller(local localReader, agents []Agent, client *http.Client, st *store
 // AgentInventories returns each agent's most recently polled inventory, in
 // configuration order, skipping agents never yet reached. An unreachable
 // agent keeps its last known inventory rather than flapping off the
-// dashboard; the agents page and the down notification carry that signal.
+// dashboard; the dashboard marks those rows stale from the stored agent
+// status, and the agents page and the down notification carry the same signal.
 func (p *Poller) AgentInventories() []inventory.Inventory {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -123,15 +124,19 @@ func (p *Poller) Gather(ctx context.Context, now time.Time) []inventory.Inventor
 			defer cancel()
 			inv, certNotAfter, err := p.fetchAgent(actx, a)
 			if err != nil {
-				p.logger.Warn("agent poll failed", "agent", a.Name, "err", err)
-				p.recordAgent(a.Name, false, 0, time.Time{}, now)
+				fails, _ := p.recordAgent(a.Name, false, 0, time.Time{}, now)
+				p.logger.Warn("agent poll failed", "agent", a.Name, "consecutive_failures", fails, "err", err)
 				return
 			}
 			inv.Host = a.Name // hub owns the display name, not the agent's hostname
 			if inv.V != inventory.WireVersion {
 				p.logger.Warn("agent wire version mismatch", "agent", a.Name, "agent_v", inv.V, "hub_v", inventory.WireVersion)
 			}
-			p.recordAgent(a.Name, true, inv.V, certNotAfter, now)
+			// A healthy poll stays silent, so the recovery line is what closes a
+			// run of failures; without it the log cannot say when an agent came back.
+			if fails, recovered := p.recordAgent(a.Name, true, inv.V, certNotAfter, now); recovered {
+				p.logger.Info("agent reachable again", "agent", a.Name, "after_failures", fails)
+			}
 			p.mu.Lock()
 			p.lastByAgent[a.Name] = inv
 			p.mu.Unlock()
@@ -181,16 +186,20 @@ func (p *Poller) fetchAgent(ctx context.Context, a Agent) (inventory.Inventory, 
 // untouched. LastPoll stamps every attempt, LastSuccess only the ones that
 // reached the agent. On an OK poll it also records the agent's wire version and
 // served-cert expiry (the latter only when non-zero); a failed poll leaves both
-// intact.
-func (p *Poller) recordAgent(name string, ok bool, wireV int, certNotAfter, now time.Time) {
+// intact. It returns the consecutive-failure count, which is the streak after
+// this attempt when it failed and the streak this attempt ended when it
+// succeeded, with recovered set only in the latter case.
+func (p *Poller) recordAgent(name string, ok bool, wireV int, certNotAfter, now time.Time) (fails int, recovered bool) {
 	st, _, err := p.store.GetAgent(name)
 	if err != nil {
 		p.logger.Warn("read agent status", "agent", name, "err", err)
 	}
+	fails = st.ConsecutiveFailures
 	st.Name = name
 	st.LastPoll = now
 	st.LastOK = ok
 	if ok {
+		recovered = fails > 0
 		st.LastSuccess = now
 		st.ConsecutiveFailures = 0
 		st.LastWireV = wireV
@@ -199,8 +208,10 @@ func (p *Poller) recordAgent(name string, ok bool, wireV int, certNotAfter, now 
 		}
 	} else {
 		st.ConsecutiveFailures++
+		fails = st.ConsecutiveFailures
 	}
 	if err := p.store.PutAgent(st); err != nil {
 		p.logger.Warn("persist agent status", "agent", name, "err", err)
 	}
+	return fails, recovered
 }

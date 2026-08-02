@@ -98,10 +98,11 @@
 {{- end}}
 
 {{define "group" -}}
-<section class="dw-group" aria-label="Host {{.Host}}" data-host="{{.Host}}">
+<section class="dw-group" aria-label="Host {{.Host}}{{if .Stale}}, unreachable{{end}}" data-host="{{.Host}}">
 	<div class="dw-ghead">
 		<span class="hname">{{.Host}}</span>
 		<span class="hmeta">{{.Count}} {{plural .Count "container" "containers"}}</span>
+		{{if .Stale}}<span class="dw-tone dw-stale"><span class="dw-dot rd" aria-hidden="true"></span>unreachable{{with reltime .LastSeen}} · last seen {{.}}{{end}}</span>{{end}}
 		{{if gt .Updates 0}}<span class="hup">{{.Updates}} {{plural .Updates "update" "updates"}}</span>{{end}}
 	</div>
 	{{range .Rows}}{{template "row" (dict "R" . "Flat" false)}}{{end}}
@@ -110,20 +111,26 @@
 
 {{define "row" -}}
 {{$r := .R -}}
-<div class="dw-row{{if .Flat}} flat{{end}}" data-host="{{$r.Host}}" data-state="{{$r.State}}">
-	{{if .Flat}}<span class="dw-host mono">{{$r.Host}}</span>{{end}}
+<div class="dw-row{{if .Flat}} flat{{end}}{{if $r.Stale}} stale{{end}}" data-host="{{$r.Host}}" data-state="{{$r.State}}">
+	{{if .Flat}}<span class="dw-host mono{{if $r.Stale}} stale{{end}}"{{if $r.Stale}} title="Host unreachable"{{end}}>{{$r.Host}}</span>{{end}}
 	<div>
 		<div class="dw-cname">{{$r.Name}}</div>
 		<div class="dw-cimg mono">{{wbrImageRef $r.Image}}</div>
 	</div>
 	{{template "versioncell" $r}}
 	<span class="dw-cell-health">{{template "healthbadge" $r.Health}}</span>
-	<span class="dw-time dw-cell-time">{{reltimeOrDash $r.Checked}}</span>
+	<span class="dw-time dw-cell-time">{{template "rowtime" $r}}</span>
 	<div class="dw-mobilefoot">
 		{{template "healthbadge" $r.Health}}
-		<span class="dw-time">{{reltimeOrDash $r.Checked}}</span>
+		<span class="dw-time">{{template "rowtime" $r}}</span>
 	</div>
 </div>
+{{- end}}
+
+{{/* A stale row reports when its host was last seen, not when the ref was last
+checked: refs shared with a live host would otherwise read "just now" here. */}}
+{{define "rowtime" -}}
+{{if .Stale}}{{reltimeOrDash .LastSeen}}{{else}}{{reltimeOrDash .Checked}}{{end}}
 {{- end}}
 
 {{define "versioncell" -}}

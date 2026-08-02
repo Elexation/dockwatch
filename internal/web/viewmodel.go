@@ -72,16 +72,20 @@ type RowVM struct {
 	RepublishedEstimated bool   // date is the hub's first-seen time, not the registry's
 	Health               string // "healthy", "unhealthy", "starting", or "" for none
 	Checked              time.Time
+	Stale                bool      // host unreachable: the row is a last-known snapshot
+	LastSeen             time.Time // that host's last successful poll, shown in place of Checked
 
 	rank DisplayState // unexported: the sort key
 }
 
 // GroupVM is one host's card in the grouped dashboard view.
 type GroupVM struct {
-	Host    string
-	Count   int
-	Updates int // rows in StateUpdate, for the accent header count
-	Rows    []RowVM
+	Host     string
+	Count    int
+	Updates  int       // rows in StateUpdate, for the accent header count
+	Stale    bool      // host unreachable: the rows are a last-known snapshot
+	LastSeen time.Time // that host's last successful poll
+	Rows     []RowVM
 }
 
 // DashboardVM is the full dashboard page model.

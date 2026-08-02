@@ -76,6 +76,10 @@ func sampleDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 		Layout:           "grouped",
 		LastCycle:        ago(5 * time.Minute),
 		NotificationsOff: true,
+		// pi4 is the down agent in sampleAgents. Its last-seen age is distinct
+		// from every CheckedAt in the fixture, so the row time cell proves which
+		// of the two it renders.
+		StaleHosts: map[string]time.Time{"pi4": ago(9 * time.Hour)},
 	}
 	return []inventory.Inventory{home, server, pi4}, checks, in
 }
@@ -190,7 +194,7 @@ func sampleAgents() ([]store.AgentStatus, AgentsInput) {
 		{Name: "backup", LastOK: true, LastPoll: ago(5 * time.Minute), LastSuccess: ago(5 * time.Minute), CertNotAfter: date(2031, 3, 4), LastRenewalReminder: ago(24 * time.Hour)},
 		// Down since well before the last attempt: the card must show the age of
 		// the last success, not of the failing poll.
-		{Name: "pi4", LastOK: false, LastPoll: ago(time.Minute), LastSuccess: ago(2 * time.Hour), CertNotAfter: date(2030, 11, 22)},
+		{Name: "pi4", LastOK: false, LastPoll: ago(time.Minute), LastSuccess: ago(9 * time.Hour), CertNotAfter: date(2030, 11, 22)},
 		{Name: "nas", LastOK: true, LastPoll: ago(41 * time.Minute), LastSuccess: ago(41 * time.Minute), CertNotAfter: date(2031, 1, 15)},
 	}
 	in := AgentsInput{

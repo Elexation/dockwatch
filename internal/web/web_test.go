@@ -94,6 +94,34 @@ func TestBuildDashboardGroupsAndSort(t *testing.T) {
 	}
 }
 
+func TestBuildDashboardMarksStaleHost(t *testing.T) {
+	invs, checks, in := sampleDashboard()
+	vm := BuildDashboard(invs, checks, in)
+
+	pi4 := vm.Groups[2]
+	if pi4.Host != "pi4" {
+		t.Fatalf("groups[2] = %q, want pi4", pi4.Host)
+	}
+	if !pi4.Stale || !pi4.LastSeen.Equal(ago(9*time.Hour)) {
+		t.Errorf("pi4 group: stale=%v lastSeen=%v, want stale with the agent's last success", pi4.Stale, pi4.LastSeen)
+	}
+	for _, r := range pi4.Rows {
+		if !r.Stale || !r.LastSeen.Equal(ago(9*time.Hour)) {
+			t.Errorf("pi4 row %q: stale=%v lastSeen=%v, want stale with the host's last success", r.Name, r.Stale, r.LastSeen)
+		}
+	}
+	for _, g := range vm.Groups[:2] {
+		if g.Stale {
+			t.Errorf("group %q marked stale; only unreachable hosts are", g.Host)
+		}
+	}
+	// The pi4 rows share no ref with a reachable host here, but the split is what
+	// matters: staleness comes from the host, never from the per-ref check.
+	if gitea := findRow(vm.FlatRows, "gitea"); gitea == nil || gitea.Stale {
+		t.Errorf("reachable host row: got %+v, want not stale", gitea)
+	}
+}
+
 func TestBuildDashboardStress(t *testing.T) {
 	invs, checks, in := stressDashboard()
 	vm := BuildDashboard(invs, checks, in)
@@ -233,6 +261,28 @@ func TestRenderDashboardChecking(t *testing.T) {
 	assertContains(t, "checking dashboard", out,
 		"data-checking", "running…", "· checking…", "Checking…", "dw-spin", "data-dw-checking", " disabled")
 	assertNoBannedGlyph(t, "checking dashboard", out)
+}
+
+func TestRenderDashboardStaleHost(t *testing.T) {
+	r := testRenderer()
+	invs, checks, in := sampleDashboard()
+	var buf bytes.Buffer
+	if err := r.RenderDashboard(&buf, BuildDashboard(invs, checks, in)); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	assertContains(t, "stale host", out,
+		"unreachable "+string(rune(0x00b7))+" last seen 9h ago",
+		`aria-label="Host pi4, unreachable"`,
+		`class="dw-row stale"`,
+		`class="dw-row flat stale"`,
+		`class="dw-host mono stale" title="Host unreachable"`,
+		// the row time is the host's last-seen stamp, not the ref's CheckedAt
+		`<span class="dw-time dw-cell-time">9h ago</span>`)
+	if strings.Contains(out, `aria-label="Host home, unreachable"`) {
+		t.Error("reachable host rendered as unreachable")
+	}
+	assertNoBannedGlyph(t, "stale host", out)
 }
 
 func TestRenderDashboardFilterHooks(t *testing.T) {

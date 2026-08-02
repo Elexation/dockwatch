@@ -177,6 +177,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		LastCycle:        s.lastCycle(latestCheck(checks)),
 		NotificationsOff: s.cfg.NotificationsOff,
 		Checking:         s.checking(),
+		StaleHosts:       s.staleHosts(),
 	})
 	if err := s.cfg.Renderer.RenderDashboard(w, vm); err != nil {
 		slog.Error("render dashboard", "err", err)
@@ -230,6 +231,24 @@ func (s *Server) lastCycle(fallback time.Time) time.Time {
 		}
 	}
 	return fallback
+}
+
+// staleHosts maps each unreachable agent to its last successful poll. The
+// poller keeps serving a down agent's last-known inventory, so without this the
+// dashboard would render those containers as if they were just checked.
+func (s *Server) staleHosts() map[string]time.Time {
+	agents, err := s.cfg.Store.AllAgents()
+	if err != nil {
+		slog.Error("read agents", "err", err)
+		return nil
+	}
+	out := make(map[string]time.Time, len(agents))
+	for _, a := range agents {
+		if !a.LastOK {
+			out[a.Name] = a.LastSuccess
+		}
+	}
+	return out
 }
 
 // agentInventories returns the poller's last-known agent inventories; empty without a poller.

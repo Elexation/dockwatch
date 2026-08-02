@@ -137,6 +137,14 @@ html, body { margin: 0; padding: 0; }
 .dw-row:last-child { border-bottom: none; }
 .dw-row:hover { background: color-mix(in oklab, var(--surface-2) 55%, var(--surface)); }
 .dw-host { font-size: var(--fs-2xs); color: var(--text-2); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; justify-self: start; }
+
+/* Stale: the host's agent is unreachable, so its rows are the last known
+   snapshot. Dimmed rather than hidden, and restored on hover to stay readable. */
+.dw-stale { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-sm); font-weight: 600; border-radius: 999px; padding: 2px 9px; white-space: nowrap; --tone: var(--bad); --tone-bg: var(--bad-bg); }
+.dw-stale .rd { background: var(--tone); }
+.dw-row.stale { opacity: 0.7; }
+.dw-row.stale:hover { opacity: 1; }
+.dw-host.stale { color: var(--bad); border-color: var(--bad); }
 .dw-cname { font-weight: 600; font-size: var(--fs-md); }
 .dw-cimg { font-size: var(--fs-xs); color: var(--text-3); overflow-wrap: break-word; }
 

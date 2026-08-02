@@ -18,6 +18,10 @@ type DashboardInput struct {
 	LastCycle        time.Time // last completed check cycle
 	NotificationsOff bool      // DW_NTFY_TOPIC unset
 	Checking         bool
+	// StaleHosts maps every unreachable agent to its last successful poll. Its
+	// containers still render, from the poller's last-known inventory, so
+	// presence here is what tells a reader those rows are a past snapshot.
+	StaleHosts map[string]time.Time
 }
 
 // AgentsInput carries the page-level inputs for the agents page.
@@ -41,6 +45,7 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 	seen := map[string]bool{}
 	var order []string
 	for _, inv := range invs {
+		lastSeen, stale := in.StaleHosts[inv.Host]
 		for _, c := range inv.Containers {
 			if c.State != "running" || c.Labels["dw.watch"] == "false" {
 				continue
@@ -48,13 +53,15 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 			ch, found := byRef[c.Image]
 			st := deriveState(c, ch, found)
 			row := RowVM{
-				Host:    inv.Host,
-				Name:    c.Name,
-				Image:   c.Image,
-				State:   st.String(),
-				Health:  c.Health,
-				Checked: ch.CheckedAt,
-				rank:    st,
+				Host:     inv.Host,
+				Name:     c.Name,
+				Image:    c.Image,
+				State:    st.String(),
+				Health:   c.Health,
+				Checked:  ch.CheckedAt,
+				Stale:    stale,
+				LastSeen: lastSeen,
+				rank:     st,
 			}
 			switch st {
 			case StateUpdate:
@@ -101,7 +108,8 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 		if len(hr) == 0 {
 			continue
 		}
-		groups = append(groups, GroupVM{Host: h, Count: len(hr), Updates: hup, Rows: hr})
+		lastSeen, stale := in.StaleHosts[h]
+		groups = append(groups, GroupVM{Host: h, Count: len(hr), Updates: hup, Stale: stale, LastSeen: lastSeen, Rows: hr})
 	}
 
 	vm := DashboardVM{
