@@ -54,6 +54,7 @@ func (c *Config) IsAgent() bool { return c.Mode == "agent" }
 var (
 	agentKeyRe       = regexp.MustCompile(`^DW_AGENT_(.+)_URL$`)
 	agentDownAlertRe = regexp.MustCompile(`^DW_AGENT_(.+)_DOWN_ALERT$`)
+	ntfyTopicRe      = regexp.MustCompile(`^[-_A-Za-z0-9]{1,64}$`) // ntfy's documented topic rule
 )
 
 var knownKeys = map[string]bool{
@@ -139,20 +140,62 @@ func Load(environ []string) (*Config, []string, error) {
 		ResetAdmin:   resetAdmin,
 	}
 
-	// Transport cross-checks; hub-only, as the agent ignores these vars.
+	// Cross-checks; hub-only, as the agent ignores these vars.
 	if cfg.IsHub() {
 		if (cfg.TLSCert == "") != (cfg.TLSKey == "") {
 			return nil, nil, fmt.Errorf("DW_TLS_CERT and DW_TLS_KEY must both be set or both be unset")
+		}
+		// Otherwise the cert is silently ignored and login is served over plain HTTP.
+		if cfg.TLSCert != "" && !cfg.HTTPS {
+			return nil, nil, fmt.Errorf("DW_TLS_CERT and DW_TLS_KEY are set but DW_HTTPS is not true: set DW_HTTPS=true to serve them")
+		}
+		if err := checkNtfy(cfg.NtfyURL, cfg.NtfyTopic); err != nil {
+			return nil, nil, err
+		}
+		// Hosts are keyed by name, so a clash would merge the two hosts' rows.
+		for _, a := range cfg.Agents {
+			if a.Name == cfg.LocalName {
+				return nil, nil, fmt.Errorf("agent name %q is also DW_LOCAL_NAME: rename the agent or set a different DW_LOCAL_NAME", a.Name)
+			}
 		}
 	}
 
 	return cfg, warnings(env, cfg), nil
 }
 
+// checkNtfy rejects an ntfy base URL or topic that would only fail at publish
+// time. Credentials belong in DW_NTFY_TOKEN, so a URL carrying them is refused,
+// and errors never echo a password.
+func checkNtfy(base, topic string) error {
+	const want = "must be http(s)://host[:port][/path]"
+	u, err := url.Parse(base)
+	if err != nil {
+		return fmt.Errorf("invalid DW_NTFY_URL: %s", want) // url.Error would echo the raw value
+	}
+	if u.User != nil {
+		return fmt.Errorf("invalid DW_NTFY_URL %q: put credentials in DW_NTFY_TOKEN, not the URL", u.Redacted())
+	}
+	// An empty "?" or "#" still moves the topic out of the path at publish time.
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" ||
+		u.RawQuery != "" || u.ForceQuery || strings.Contains(base, "#") {
+		return fmt.Errorf("invalid DW_NTFY_URL %q: %s", base, want)
+	}
+	if topic != "" && !ntfyTopicRe.MatchString(topic) {
+		return fmt.Errorf("invalid DW_NTFY_TOPIC %q: must be the bare topic name, 1-64 letters, digits, '-' or '_'", topic)
+	}
+	return nil
+}
+
 func warnings(env map[string]string, cfg *Config) []string {
 	var out []string
 	if cfg.IsHub() && cfg.NtfyTopic == "" {
 		out = append(out, "DW_NTFY_TOPIC not set: notifications disabled")
+	}
+	if cfg.IsHub() && cfg.NtfyToken != "" {
+		// The parsed scheme, since url.Parse lowercases it: "HTTP://" is plaintext too.
+		if u, err := url.Parse(cfg.NtfyURL); err == nil && u.Scheme == "http" {
+			out = append(out, "DW_NTFY_TOKEN is sent unencrypted: DW_NTFY_URL uses http://")
+		}
 	}
 
 	var unknown []string

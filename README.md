@@ -48,6 +48,12 @@ docker compose -f compose.hub.yml up -d
 Open `http://<host>:8080`; the first visit creates the admin account. Set
 `DW_NTFY_TOPIC` to enable [ntfy](https://ntfy.sh) notifications.
 
+Forgot the admin password? Set `DW_RESET_ADMIN=true` and recreate the container
+(`docker compose up -d`; `docker compose restart` keeps the old environment), create
+the account again, then remove the variable and recreate it once more. While the
+variable is set, every start wipes the account and reopens setup to whoever reaches
+the port first.
+
 ### Behind a reverse proxy
 
 [compose.hub-proxy.yml](examples/compose.hub-proxy.yml) publishes the UI on loopback
@@ -57,7 +63,7 @@ only and expects the proxy to terminate TLS. Set `DW_TRUSTED_PROXY=true` and poi
 ### Watching other machines
 
 Add one `DW_AGENT_<NAME>_URL` per remote machine to the hub, e.g.
-`DW_AGENT_HOME_URL=https://10.27.27.8:7443`. On its next start the hub mints
+`DW_AGENT_HOME_URL=https://192.0.2.10:7443`. On its next start the hub mints
 `certs/agents/<name>/bundle.pem`; copy that one file into `./certs` on the agent host
 and run [compose.agent.yml](examples/compose.agent.yml) there. The agent serves a
 single mutual-TLS route and makes no outbound connections.

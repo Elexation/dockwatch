@@ -47,7 +47,7 @@ func TestAgentModeDefaultPort(t *testing.T) {
 func TestAgents(t *testing.T) {
 	cfg, _, err := Load([]string{
 		"DW_NTFY_TOPIC=x",
-		"DW_AGENT_HOME_URL=https://10.27.27.8:7443",
+		"DW_AGENT_HOME_URL=https://192.0.2.10:7443",
 		"DW_AGENT_NAS_URL=https://nas.lan:7443",
 	})
 	if err != nil {
@@ -59,7 +59,7 @@ func TestAgents(t *testing.T) {
 	if cfg.Agents[0].Name != "home" || cfg.Agents[1].Name != "nas" {
 		t.Errorf("agent names = %q %q, want home/nas (sorted, lowercased)", cfg.Agents[0].Name, cfg.Agents[1].Name)
 	}
-	if cfg.Agents[0].URL != "https://10.27.27.8:7443" {
+	if cfg.Agents[0].URL != "https://192.0.2.10:7443" {
 		t.Errorf("home url = %q", cfg.Agents[0].URL)
 	}
 	if !cfg.Agents[0].DownAlert || !cfg.Agents[1].DownAlert {
@@ -70,7 +70,7 @@ func TestAgents(t *testing.T) {
 func TestAgentDownAlert(t *testing.T) {
 	cfg, warns, err := Load([]string{
 		"DW_NTFY_TOPIC=x",
-		"DW_AGENT_HOME_URL=https://10.27.27.8:7443",
+		"DW_AGENT_HOME_URL=https://192.0.2.10:7443",
 		"DW_AGENT_NAS_URL=https://nas.lan:7443",
 		"DW_AGENT_NAS_DOWN_ALERT=false",
 	})
@@ -110,6 +110,14 @@ func TestFailFast(t *testing.T) {
 		{"bad bool", []string{"DW_HTTPS=maybe"}, "DW_HTTPS"},
 		{"tls cert only", []string{"DW_TLS_CERT=/c"}, "DW_TLS_CERT"},
 		{"tls key only", []string{"DW_TLS_KEY=/k"}, "DW_TLS_KEY"},
+		{"tls without https", []string{"DW_TLS_CERT=/c", "DW_TLS_KEY=/k"}, "DW_HTTPS"},
+		{"ntfy url no scheme", []string{"DW_NTFY_URL=ntfy.example.com"}, "DW_NTFY_URL"},
+		{"ntfy topic as url", []string{"DW_NTFY_TOPIC=https://ntfy.sh/mytopic"}, "DW_NTFY_TOPIC"},
+		{"ntfy url credentials", []string{"DW_NTFY_URL=https://alice:s3cret@ntfy.lan"}, "DW_NTFY_TOKEN"},
+		{"ntfy url empty query", []string{"DW_NTFY_URL=https://ntfy.sh?"}, "DW_NTFY_URL"},
+		{"ntfy url empty fragment", []string{"DW_NTFY_URL=https://ntfy.sh/#"}, "DW_NTFY_URL"},
+		{"ntfy url no hostname", []string{"DW_NTFY_URL=https://:443"}, "DW_NTFY_URL"},
+		{"agent named local", []string{"DW_AGENT_LOCAL_URL=https://h:1"}, "DW_LOCAL_NAME"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -151,13 +159,37 @@ func TestValidOverrides(t *testing.T) {
 
 func TestTransportValidCombos(t *testing.T) {
 	cases := [][]string{
-		{"DW_NTFY_TOPIC=t", "DW_TLS_CERT=/c", "DW_TLS_KEY=/k"},
+		{"DW_NTFY_TOPIC=t", "DW_HTTPS=true", "DW_TLS_CERT=/c", "DW_TLS_KEY=/k"},
+		{"DW_NTFY_TOPIC=t", "DW_NTFY_URL=http://ntfy.lan:8090/sub/"},
 		{"DW_NTFY_TOPIC=t", "DW_HTTPS=true"},
 		{"DW_NTFY_TOPIC=t", "DW_TRUSTED_PROXY=true"},
 	}
 	for _, env := range cases {
 		if _, _, err := Load(env); err != nil {
 			t.Errorf("Load(%v) = %v, want nil", env, err)
+		}
+	}
+}
+
+func TestNtfyCredentialsNeverEchoed(t *testing.T) {
+	_, _, err := Load([]string{"DW_NTFY_URL=https://alice:s3cret@ntfy.lan/?x"})
+	if err == nil || strings.Contains(err.Error(), "s3cret") {
+		t.Errorf("err = %v, want a rejection that does not echo the password", err)
+	}
+}
+
+func TestPlaintextTokenWarns(t *testing.T) {
+	for _, u := range []string{"http://ntfy.lan:8090", "HTTP://ntfy.lan:8090"} {
+		_, warns, err := Load([]string{"DW_NTFY_TOPIC=t", "DW_NTFY_TOKEN=tk_x", "DW_NTFY_URL=" + u})
+		if err != nil {
+			t.Fatalf("%s: err: %v", u, err)
+		}
+		found := false
+		for _, w := range warns {
+			found = found || strings.Contains(w, "DW_NTFY_TOKEN is sent unencrypted")
+		}
+		if !found {
+			t.Errorf("%s: warnings = %v, want the plaintext-token warning", u, warns)
 		}
 	}
 }
