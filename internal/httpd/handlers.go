@@ -3,11 +3,13 @@ package httpd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elexation/dockwatch/internal/inventory"
 	"github.com/elexation/dockwatch/internal/store"
@@ -17,6 +19,9 @@ import (
 const (
 	dockerReadTimeout = 5 * time.Second
 	minPasswordLen    = 8
+	passwordRequired  = "Password is required."
+	passwordMismatch  = "Passwords don't match."
+	badHashMsg        = "stored admin password hash is unreadable; set DW_RESET_ADMIN=true to re-run setup"
 )
 
 // Both strings derive from minPasswordLen so the hint cannot drift from the rule.
@@ -24,6 +29,18 @@ var (
 	passwordHint     = fmt.Sprintf("At least %d characters.", minPasswordLen)
 	passwordTooShort = fmt.Sprintf("Password must be at least %d characters.", minPasswordLen)
 )
+
+// passwordErrors is what the settings page shows for each code a rejected
+// password change redirects with.
+var passwordErrors = map[string]struct{ banner, pwErr, confirmErr string }{
+	"current":   {banner: "Current password is incorrect"},
+	"busy":      {banner: busyBanner},
+	"throttled": {banner: "Too many failed attempts, wait a minute and try again"},
+	"required":  {pwErr: passwordRequired},
+	"short":     {pwErr: passwordTooShort},
+	"same":      {pwErr: "New password must differ from the current one."},
+	"mismatch":  {confirmErr: passwordMismatch},
+}
 
 // --- first-run setup ---
 
@@ -61,10 +78,17 @@ func (s *Server) setupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	admin := store.Admin{Username: username, Hash: hash, CreatedAt: s.now()}
-	if err := s.cfg.Store.PutAdmin(admin); err != nil {
+	if err := s.cfg.Store.CreateAdmin(admin); err != nil {
+		if errors.Is(err, store.ErrAdminExists) {
+			slog.Warn("first-run setup refused: a concurrent setup already created the admin")
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
 		s.fail(w, "store admin", err)
 		return
 	}
+	// The startup log said setup was open to anyone; record when it closed.
+	slog.Info("admin account created; first-run setup closed", "username", username)
 	if err := s.startSession(w, admin); err != nil {
 		s.fail(w, "start session", err)
 		return
@@ -78,12 +102,12 @@ func validateSetup(username, pw, confirm string) (userErr, pwErr, confirmErr str
 	}
 	switch {
 	case pw == "":
-		pwErr = "Password is required."
-	case len(pw) < minPasswordLen:
+		pwErr = passwordRequired
+	case utf8.RuneCountInString(pw) < minPasswordLen:
 		pwErr = passwordTooShort
 	}
 	if pwErr == "" && confirm != pw {
-		confirmErr = "Passwords don't match."
+		confirmErr = passwordMismatch
 	}
 	return
 }
@@ -120,6 +144,9 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 			s.renderLogin(w, web.LoginVM{Theme: themeFrom(r), Banner: banner, Fields: loginFields(username)})
 			return
 		}
+		if verr != nil {
+			slog.Error(badHashMsg, "err", verr)
+		}
 		ok = verr == nil && match && username == admin.Username
 	}
 	if !ok {
@@ -147,17 +174,22 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 // --- settings ---
 
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	e := passwordErrors[q.Get("err")]
 	s.renderSettings(w, web.SettingsVM{
 		Chrome: s.chrome(r, "settings"),
-		Done:   r.URL.Query().Get("changed") == "1",
-		Fields: passwordFields("", "", ""),
+		Done:   q.Get("changed") == "1",
+		Banner: e.banner,
+		Fields: passwordFields("", e.pwErr, e.confirmErr),
 	})
 }
 
 // passwordSubmit rewrites the admin hash and bumps its epoch, which invalidates
 // every existing session at once, then reissues this one. A change made because
 // the old password leaked therefore evicts whoever had it, without signing the
-// operator out of the page they are on.
+// operator out of the page they are on. Every outcome redirects rather than
+// renders: app.js reloads after a check cycle, and reloading a POST response
+// would resubmit the form.
 func (s *Server) passwordSubmit(w http.ResponseWriter, r *http.Request) {
 	current := r.PostFormValue("current")
 	pw := r.PostFormValue("password")
@@ -176,47 +208,46 @@ func (s *Server) passwordSubmit(w http.ResponseWriter, r *http.Request) {
 	// Shares the login's failure count: a stolen session must not become a
 	// second, unthrottled way to guess the password.
 	match, verr := s.guard.verify(r.Context(), admin.Hash, current)
-	if code, banner := refusal(w, verr); code != 0 {
-		w.WriteHeader(code)
-		s.renderSettings(w, web.SettingsVM{Chrome: s.chrome(r, "settings"), Banner: banner, Fields: passwordFields("", "", "")})
+	if code := refusalCode(verr); code != "" {
+		settingsError(w, r, code)
 		return
 	}
 	if verr != nil || !match {
 		s.guard.failed()
-		slog.Warn("password change rejected: wrong current password")
-		w.WriteHeader(http.StatusUnauthorized)
-		s.renderSettings(w, web.SettingsVM{
-			Chrome: s.chrome(r, "settings"),
-			Banner: "Current password is incorrect",
-			Fields: passwordFields("", "", ""),
-		})
+		if verr != nil {
+			slog.Error(badHashMsg, "err", verr)
+		} else {
+			slog.Warn("password change rejected: wrong current password")
+		}
+		settingsError(w, r, "current")
 		return
 	}
 	s.guard.succeeded()
 
-	pwErr, confirmErr := validatePassword(pw, confirm, current)
-	if pwErr != "" || confirmErr != "" {
-		w.WriteHeader(http.StatusBadRequest)
-		s.renderSettings(w, web.SettingsVM{
-			Chrome: s.chrome(r, "settings"),
-			Fields: passwordFields("", pwErr, confirmErr),
-		})
+	if code := validatePassword(pw, confirm, current); code != "" {
+		settingsError(w, r, code)
 		return
 	}
 
 	hash, err := s.guard.hash(r.Context(), pw)
-	if code, banner := refusal(w, err); code != 0 {
-		w.WriteHeader(code)
-		s.renderSettings(w, web.SettingsVM{Chrome: s.chrome(r, "settings"), Banner: banner, Fields: passwordFields("", "", "")})
+	if code := refusalCode(err); code != "" {
+		settingsError(w, r, code)
 		return
 	}
 	if err != nil {
 		s.fail(w, "hash password", err)
 		return
 	}
-	admin.Hash = hash
-	admin.Epoch++
-	if err := s.cfg.Store.PutAdmin(admin); err != nil {
+	// Conditional on the epoch read above, so two racing changes cannot both
+	// land on the same new epoch and each keep its own session alive.
+	admin, err = s.cfg.Store.ChangePassword(admin.Epoch, hash)
+	if errors.Is(err, store.ErrAdminChanged) {
+		// The other change's epoch bump already ended this session.
+		s.clearSessionCookie(w)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if err != nil {
 		s.fail(w, "store admin", err)
 		return
 	}
@@ -229,26 +260,29 @@ func (s *Server) passwordSubmit(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "start session", err)
 		return
 	}
-	// Redirect rather than render: app.js reloads after a check cycle, and
-	// reloading a POST response would resubmit the old password.
 	http.Redirect(w, r, "/settings?changed=1", http.StatusSeeOther)
 }
 
+// settingsError sends a rejected password change back to the settings page.
+func settingsError(w http.ResponseWriter, r *http.Request, code string) {
+	http.Redirect(w, r, "/settings?err="+code, http.StatusSeeOther)
+}
+
 // validatePassword checks a new password against the length rule, its confirmation,
-// and the one it replaces; current is compared so a no-op change cannot look like one.
-func validatePassword(pw, confirm, current string) (pwErr, confirmErr string) {
+// and the one it replaces, returning a passwordErrors code; "" if it passes.
+// current is compared so a no-op change cannot look like one.
+func validatePassword(pw, confirm, current string) string {
 	switch {
 	case pw == "":
-		pwErr = "Password is required."
-	case len(pw) < minPasswordLen:
-		pwErr = passwordTooShort
+		return "required"
+	case utf8.RuneCountInString(pw) < minPasswordLen:
+		return "short"
 	case pw == current:
-		pwErr = "New password must differ from the current one."
+		return "same"
+	case confirm != pw:
+		return "mismatch"
 	}
-	if pwErr == "" && confirm != pw {
-		confirmErr = "Passwords don't match."
-	}
-	return
+	return ""
 }
 
 func passwordFields(currentErr, pwErr, confirmErr string) []web.FieldVM {
@@ -353,11 +387,13 @@ func (s *Server) chrome(r *http.Request, active string) web.ChromeVM {
 	}
 }
 
+// adminExists reports whether setup has run. A store error reads as true, so
+// the unauthenticated setup page stays shut rather than failing open.
 func (s *Server) adminExists() bool {
 	exists, err := s.cfg.Store.AdminExists()
 	if err != nil {
 		slog.Error("check admin", "err", err)
-		return false
+		return true
 	}
 	return exists
 }

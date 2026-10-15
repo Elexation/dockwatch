@@ -23,8 +23,7 @@ type Params struct {
 	KeyLen  uint32 // bytes
 }
 
-// DefaultParams is RFC 9106's second recommended (memory-constrained) option,
-// tuned for roughly 100ms on a Raspberry Pi 4.
+// DefaultParams is RFC 9106's second recommended (memory-constrained) option.
 var DefaultParams = Params{
 	Memory:  64 * 1024,
 	Time:    3,

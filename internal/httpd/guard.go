@@ -22,6 +22,8 @@ const (
 // errBusy means no hashing slot freed up in time.
 var errBusy = errors.New("password check busy")
 
+const busyBanner = "The hub is busy, try again in a moment"
+
 // throttledError means recent wrong passwords have blocked attempts for Wait.
 type throttledError struct{ Wait time.Duration }
 
@@ -120,11 +122,23 @@ func refusal(w http.ResponseWriter, err error) (int, string) {
 	switch {
 	case errors.Is(err, errBusy):
 		w.Header().Set("Retry-After", strconv.Itoa(int(hashWait/time.Second)))
-		return http.StatusServiceUnavailable, "The hub is busy, try again in a moment"
+		return http.StatusServiceUnavailable, busyBanner
 	case errors.As(err, &t):
 		secs := int((t.Wait + time.Second - 1) / time.Second)
 		w.Header().Set("Retry-After", strconv.Itoa(secs))
 		return http.StatusTooManyRequests, fmt.Sprintf("Too many failed attempts, wait %ds and try again", secs)
 	}
 	return 0, ""
+}
+
+// refusalCode names a guard refusal for the settings redirect; "" if err is neither busy nor throttled.
+func refusalCode(err error) string {
+	var t throttledError
+	switch {
+	case errors.Is(err, errBusy):
+		return "busy"
+	case errors.As(err, &t):
+		return "throttled"
+	}
+	return ""
 }

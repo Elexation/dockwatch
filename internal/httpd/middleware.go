@@ -47,7 +47,7 @@ func (s *Server) validSession(r *http.Request) (store.Session, bool) {
 		return store.Session{}, false
 	}
 	// The epoch check, not ClearSessions, is what evicts on a password change: a
-	// login or slide racing the change can write a session back after the wipe.
+	// login that verified the old hash can write a session back after the wipe.
 	if !s.now().Before(sess.Expiry) || sess.Epoch != admin.Epoch {
 		_ = s.cfg.Store.DeleteSession(sess.ID)
 		return store.Session{}, false
@@ -62,8 +62,7 @@ func (s *Server) slide(w http.ResponseWriter, sess store.Session) {
 	if sess.Expiry.Sub(now) > s.ttl-24*time.Hour {
 		return
 	}
-	sess.Expiry = now.Add(s.ttl)
-	if err := s.cfg.Store.PutSession(sess); err == nil {
+	if found, err := s.cfg.Store.ExtendSession(sess.ID, now.Add(s.ttl)); err == nil && found {
 		s.setSessionCookie(w, sess.ID)
 	}
 }

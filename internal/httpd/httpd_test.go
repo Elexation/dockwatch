@@ -74,8 +74,8 @@ func seedAdmin(t *testing.T, st *store.Store, user, pw string) {
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
-	if err := st.PutAdmin(store.Admin{Username: user, Hash: h, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("PutAdmin: %v", err)
+	if err := st.CreateAdmin(store.Admin{Username: user, Hash: h, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateAdmin: %v", err)
 	}
 }
 
@@ -144,6 +144,14 @@ func TestSetupCreatesAdminThenLocks(t *testing.T) {
 	if rec := do(s, "GET", "/", nil, cookie); rec.Code != http.StatusOK {
 		t.Fatalf("GET / with session: code=%d, want 200", rec.Code)
 	}
+}
+
+func TestSetupFailsClosedOnStoreError(t *testing.T) {
+	s, st := newTestServer(t, false)
+	st.Close() // every store read now errors
+	wantRedirect(t, do(s, "GET", "/setup", nil), "/login")
+	form := url.Values{"username": {"admin"}, "password": {"hunter2pass"}, "confirm": {"hunter2pass"}}
+	wantRedirect(t, do(s, "POST", "/setup", form), "/login")
 }
 
 func TestSetupRejectsMismatch(t *testing.T) {
@@ -334,39 +342,43 @@ func TestPasswordChangeRejects(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		form url.Values
-		code int
+		err  string
 		want string
 	}{
 		{
 			"wrong current",
 			url.Values{"current": {"wrongpass1"}, "password": {"replacement1"}, "confirm": {"replacement1"}},
-			http.StatusUnauthorized, "Current password is incorrect",
+			"current", "Current password is incorrect",
 		},
 		{
 			"too short",
 			url.Values{"current": {"hunter2pass"}, "password": {"short1"}, "confirm": {"short1"}},
-			http.StatusBadRequest, passwordTooShort,
+			"short", passwordTooShort,
+		},
+		{
+			"too short in characters",
+			url.Values{"current": {"hunter2pass"}, "password": {"ééééé"}, "confirm": {"ééééé"}},
+			"short", passwordTooShort,
 		},
 		{
 			"mismatched confirm",
 			url.Values{"current": {"hunter2pass"}, "password": {"replacement1"}, "confirm": {"replacement2"}},
-			http.StatusBadRequest, "Passwords don&#39;t match.",
+			"mismatch", "Passwords don&#39;t match.",
 		},
 		{
 			"unchanged",
 			url.Values{"current": {"hunter2pass"}, "password": {"hunter2pass"}, "confirm": {"hunter2pass"}},
-			http.StatusBadRequest, "must differ",
+			"same", "must differ",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, st := newTestServer(t, false)
 			cookie := loginSession(t, s, st)
 
-			rec := do(s, "POST", "/settings/password", tc.form, cookie)
-			if rec.Code != tc.code {
-				t.Fatalf("code=%d, want %d", rec.Code, tc.code)
-			}
-			if !strings.Contains(rec.Body.String(), tc.want) {
+			// A redirect, never a rendered POST response, so a reload cannot resubmit.
+			to := "/settings?err=" + tc.err
+			wantRedirect(t, do(s, "POST", "/settings/password", tc.form, cookie), to)
+			if page := do(s, "GET", to, nil, cookie); !strings.Contains(page.Body.String(), tc.want) {
 				t.Errorf("page missing %q", tc.want)
 			}
 			// Every rejection must leave the stored password untouched.
