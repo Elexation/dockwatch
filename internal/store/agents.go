@@ -20,7 +20,35 @@ type AgentStatus struct {
 	WireNotifiedV int `json:"wire_notified_v,omitempty"` // wire version already alerted on (once-per-detection gate)
 
 	CertNotAfter        time.Time `json:"cert_not_after,omitempty"`        // expiry of the cert served on the last OK poll
-	LastRenewalReminder time.Time `json:"last_renewal_reminder,omitempty"` // last weekly "bundle not installed" reminder
+	LastRenewalReminder time.Time `json:"last_renewal_reminder,omitempty"` // last staged-bundle alert (renewal push or weekly reminder); non-zero lights the agents-page warn flag
+	ReissuePending      bool      `json:"reissue_pending,omitempty"`       // re-issue alert (new address or CA) not yet delivered
+}
+
+// UpdateAgent applies fn to name's stored status within one transaction;
+// found=false, and fn is not called, if no status exists. It changes only what
+// fn touches, but other writers replace whole records, so callers must still
+// not overlap them (the scheduler runs the renewal pass and the cycle serially).
+func (s *Store) UpdateAgent(name string, fn func(*AgentStatus)) (bool, error) {
+	var found bool
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketAgents)
+		v := b.Get([]byte(name))
+		if v == nil {
+			return nil
+		}
+		var a AgentStatus
+		if err := json.Unmarshal(v, &a); err != nil {
+			return err
+		}
+		fn(&a)
+		data, err := json.Marshal(a)
+		if err != nil {
+			return err
+		}
+		found = true
+		return b.Put([]byte(name), data)
+	})
+	return found, err
 }
 
 // PutAgent stores a under its name, replacing any previous status.

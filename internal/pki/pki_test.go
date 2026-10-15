@@ -70,14 +70,14 @@ func TestMintHubClient(t *testing.T) {
 func TestMintAgentServerSAN(t *testing.T) {
 	ca, _ := MintCA(testNow)
 
-	ipLeaf, err := ca.MintAgentServer(testNow, "10.27.27.8")
+	ipLeaf, err := ca.MintAgentServer(testNow, "192.0.2.10")
 	if err != nil {
 		t.Fatalf("MintAgentServer(ip): %v", err)
 	}
 	if !hasExtUsage(ipLeaf.Cert, x509.ExtKeyUsageServerAuth) {
 		t.Error("agent leaf missing ServerAuth")
 	}
-	if !sanMatches(ipLeaf.Cert, "10.27.27.8") {
+	if !sanMatches(ipLeaf.Cert, "192.0.2.10") {
 		t.Errorf("IP SAN not set: IPs=%v", ipLeaf.Cert.IPAddresses)
 	}
 	if len(ipLeaf.Cert.DNSNames) != 0 {
@@ -312,6 +312,174 @@ func TestBootstrapRenewal(t *testing.T) {
 	}
 	if !hasKind(ev, Renewed) {
 		t.Fatalf("events = %v, want renewed", kinds(ev))
+	}
+}
+
+func TestBootstrapRefusesOrphanedCAKey(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Bootstrap(dir, []AgentRef{{Name: "home", Host: "10.0.0.5"}}, testNow); err != nil {
+		t.Fatalf("seed Bootstrap: %v", err)
+	}
+	keyBefore, err := os.ReadFile(filepath.Join(dir, "ca.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "ca.crt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Bootstrap(dir, []AgentRef{{Name: "home", Host: "10.0.0.5"}}, testNow); err == nil {
+		t.Fatal("Bootstrap with ca.key but no ca.crt succeeded, want an error")
+	}
+	keyAfter, err := os.ReadFile(filepath.Join(dir, "ca.key"))
+	if err != nil || string(keyAfter) != string(keyBefore) {
+		t.Error("the surviving ca.key was overwritten")
+	}
+}
+
+func TestBootstrapNewCARemintsOldLeaves(t *testing.T) {
+	dir := t.TempDir()
+	agents := []AgentRef{{Name: "home", Host: "10.0.0.5"}}
+	if _, err := Bootstrap(dir, agents, testNow); err != nil {
+		t.Fatalf("seed Bootstrap: %v", err)
+	}
+	for _, f := range []string{"ca.crt", "ca.key"} {
+		if err := os.Remove(filepath.Join(dir, f)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ev, err := Bootstrap(dir, agents, testNow)
+	if err != nil {
+		t.Fatalf("new-CA Bootstrap: %v", err)
+	}
+	if !hasKind(ev, MintedCA) || !hasKind(ev, MintedHub) || !hasKind(ev, RemintedCA) {
+		t.Fatalf("events = %v, want minted-ca, minted-hub and reminted-ca", kinds(ev))
+	}
+	caPEM, _ := os.ReadFile(filepath.Join(dir, "ca.crt"))
+	ca, _ := firstCert(caPEM)
+	for _, f := range []string{"hub.crt", filepath.Join("agents", "home", "bundle.pem")} {
+		b, _ := os.ReadFile(filepath.Join(dir, f))
+		leaf, _ := firstCert(b)
+		if err := leaf.CheckSignatureFrom(ca); err != nil {
+			t.Errorf("%s does not chain to the new CA: %v", f, err)
+		}
+	}
+	// Settled: the next pass mints nothing.
+	if ev, err := Bootstrap(dir, agents, testNow); err != nil || len(ev) != 0 {
+		t.Errorf("follow-up Bootstrap: events=%v err=%v, want none", kinds(ev), err)
+	}
+}
+
+func TestBootstrapKeepsLeavesDuringRollover(t *testing.T) {
+	agents := []AgentRef{{Name: "home", Host: "10.0.0.5"}}
+	for _, newFirst := range []bool{true, false} {
+		dir := t.TempDir()
+		if _, err := Bootstrap(dir, agents, testNow); err != nil {
+			t.Fatalf("seed Bootstrap: %v", err)
+		}
+		oldPEM, err := os.ReadFile(filepath.Join(dir, "ca.crt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, err := MintCA(testNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keyPEM, err := keyToPEM(next.Key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Hand-made rollover: both CAs trusted, the new key signs, in either order.
+		pool := append(certToPEM(next.Cert), oldPEM...)
+		if !newFirst {
+			pool = append(append([]byte{}, oldPEM...), certToPEM(next.Cert)...)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "ca.crt"), pool, pubPerm); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "ca.key"), keyPEM, privPerm); err != nil {
+			t.Fatal(err)
+		}
+		ev, err := Bootstrap(dir, agents, testNow)
+		if err != nil {
+			t.Fatalf("newFirst=%v: Bootstrap: %v", newFirst, err)
+		}
+		if len(ev) != 0 {
+			t.Errorf("newFirst=%v: events = %v, want none: leaves from the old CA still verify", newFirst, kinds(ev))
+		}
+	}
+}
+
+func TestBootstrapRemintsMissingHubKey(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Bootstrap(dir, nil, testNow); err != nil {
+		t.Fatalf("seed Bootstrap: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "hub.key")); err != nil {
+		t.Fatal(err)
+	}
+	ev, err := Bootstrap(dir, nil, testNow)
+	if err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	if !hasKind(ev, MintedHub) {
+		t.Fatalf("events = %v, want minted-hub", kinds(ev))
+	}
+	if _, _, err := LoadHubClient(dir); err != nil {
+		t.Errorf("hub client still unusable: %v", err)
+	}
+}
+
+func TestBootstrapRejectsMismatchedCAKey(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Bootstrap(dir, nil, testNow); err != nil {
+		t.Fatalf("seed Bootstrap: %v", err)
+	}
+	other, err := MintCA(testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPEM, err := keyToPEM(other.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ca.key"), keyPEM, privPerm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Bootstrap(dir, nil, testNow); err == nil {
+		t.Fatal("Bootstrap accepted a ca.key from another CA")
+	}
+}
+
+func TestBootstrapUnreadableCAKeyIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Bootstrap(dir, nil, testNow); err != nil {
+		t.Fatalf("seed Bootstrap: %v", err)
+	}
+	// A bind mount of a missing host path leaves a directory where the key should be.
+	keyPath := filepath.Join(dir, "ca.key")
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(keyPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ev, err := Bootstrap(dir, nil, testNow)
+	if err == nil {
+		t.Fatalf("Bootstrap succeeded with events %v, want a read error", kinds(ev))
+	}
+}
+
+func TestSANMatchIgnoresCase(t *testing.T) {
+	ca, err := MintCA(testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := ca.MintAgentServer(testNow, "server.lan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sanMatches(leaf.Cert, "Server.LAN") {
+		t.Error("a host differing only in case does not match")
 	}
 }
 

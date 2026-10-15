@@ -1,6 +1,7 @@
 package pki
 
 import (
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"os"
@@ -39,13 +40,15 @@ const (
 	MintedHub     EventKind = "minted-hub"
 	MintedBundle  EventKind = "minted-bundle"
 	RemintedSAN   EventKind = "reminted-san"
+	RemintedCA    EventKind = "reminted-ca"
 	Renewed       EventKind = "renewed"
 	CAKeyMissing  EventKind = "ca-key-missing"
 	OrphanedAgent EventKind = "orphaned-agent"
 )
 
-// Event is one notable thing Bootstrap did or noticed. Every event is logged,
-// and the agent-facing kinds are turned into ntfy notifications by the caller.
+// Event is one notable thing Bootstrap did or noticed. Every event is logged;
+// the caller also notifies an agent bundle that was renewed or re-minted (new
+// address or new CA) and a missing CA key, and leaves the rest log-only.
 type Event struct {
 	Kind   EventKind
 	Name   string // agent name, when relevant
@@ -54,10 +57,12 @@ type Event struct {
 }
 
 // Bootstrap applies the startup minting and renewal rules against dir: mint
-// whatever is missing, reuse whatever exists, re-mint on SAN drift or imminent
-// expiry. It never deletes anything. The returned events are for
-// logging/notification; a non-nil error is fatal and means the certs dir is
-// unreadable or corrupt (fail-fast).
+// whatever is missing, reuse whatever exists, and re-mint a leaf on SAN drift,
+// imminent expiry, a signature from a previous CA, or a missing or mismatched
+// hub.key. It never deletes anything, so a ca.key left without its ca.crt is an
+// error rather than overwritten. The returned events are for logging and
+// notification. A non-nil error means the certs dir is unreadable or
+// inconsistent; it is fatal at startup, and the daily renewal pass logs it.
 func Bootstrap(dir string, agents []AgentRef, now time.Time) ([]Event, error) {
 	var events []Event
 
@@ -81,25 +86,47 @@ func Bootstrap(dir string, agents []AgentRef, now time.Time) ([]Event, error) {
 
 func loadOrMintCA(dir string, now time.Time, events *[]Event) (*CA, error) {
 	certPath := filepath.Join(dir, caCertFile)
+	keyPath := filepath.Join(dir, caKeyFile)
 	certPEM, err := os.ReadFile(certPath)
 	switch {
 	case err == nil:
 		// CA cert exists; load it, plus the key if present (it may be off-machine).
-		cert, lerr := LoadCACert(certPEM)
+		certs, lerr := parseCerts(certPEM)
+		if lerr == nil && len(certs) == 0 {
+			lerr = errors.New("no certificate in PEM")
+		}
 		if lerr != nil {
-			return nil, lerr
+			return nil, fmt.Errorf("load ca.crt: %w", lerr)
 		}
-		ca := &CA{Cert: cert}
-		if keyPEM, kerr := os.ReadFile(filepath.Join(dir, caKeyFile)); kerr == nil {
-			key, perr := LoadCAKey(keyPEM)
-			if perr != nil {
-				return nil, perr
+		ca := &CA{Cert: certs[0], Trusted: certs}
+		keyPEM, kerr := os.ReadFile(keyPath)
+		if errors.Is(kerr, os.ErrNotExist) {
+			return ca, nil
+		}
+		if kerr != nil {
+			return nil, fmt.Errorf("read %s: %w", keyPath, kerr)
+		}
+		key, perr := LoadCAKey(keyPEM)
+		if perr != nil {
+			return nil, perr
+		}
+		// During a rollover ca.crt holds two CAs in either order; ca.key picks the signer.
+		for _, c := range certs {
+			if verifyKeyPossession(c, key) == nil {
+				ca.Cert, ca.Key = c, key
+				return ca, nil
 			}
-			ca.Key = key
 		}
-		return ca, nil
+		return nil, errors.New("load ca.key: private key matches no certificate in ca.crt")
 	case errors.Is(err, os.ErrNotExist):
-		// First boot: mint the CA (writes both ca.crt and ca.key).
+		// Minting would overwrite a surviving ca.key, the only copy of the old CA.
+		if _, serr := os.Stat(keyPath); serr == nil {
+			return nil, fmt.Errorf("%s exists without %s: restore %s, or delete %s to start a new CA and re-copy every agent bundle",
+				caKeyFile, caCertFile, caCertFile, caKeyFile)
+		} else if !errors.Is(serr, os.ErrNotExist) {
+			return nil, fmt.Errorf("stat %s: %w", keyPath, serr)
+		}
+		// No CA yet: mint one (writes both ca.key and ca.crt).
 		ca, merr := MintCA(now)
 		if merr != nil {
 			return nil, merr
@@ -123,10 +150,20 @@ func ensureHubCert(dir string, ca *CA, now time.Time, events *[]Event) error {
 		if perr != nil {
 			return fmt.Errorf("read %s: %w", certPath, perr)
 		}
-		if !needsRenewal(cert, now) {
-			return nil
+		if needsRenewal(cert, now) {
+			return mintHub(dir, ca, now, events, Renewed, "renewed hub client cert", "hub cert renewal")
 		}
-		return mintHub(dir, ca, now, events, Renewed, "renewed hub client cert", "hub cert renewal")
+		if !ca.issued(cert) {
+			return mintHub(dir, ca, now, events, MintedHub, "re-minted hub client cert: hub.crt was signed by a previous CA", "hub cert minting")
+		}
+		ok, kerr := hubKeyMatches(dir, cert)
+		if kerr != nil {
+			return kerr
+		}
+		if !ok {
+			return mintHub(dir, ca, now, events, MintedHub, "re-minted hub client cert: hub.key was missing or did not match", "hub cert minting")
+		}
+		return nil
 	case errors.Is(err, os.ErrNotExist):
 		return mintHub(dir, ca, now, events, MintedHub, "minted hub client cert", "hub cert minting")
 	default:
@@ -150,6 +187,24 @@ func mintHub(dir string, ca *CA, now time.Time, events *[]Event, kind EventKind,
 	return nil
 }
 
+// hubKeyMatches reports whether hub.key holds cert's private key. A missing or
+// unparseable key is false, so the pair is re-minted rather than left broken.
+func hubKeyMatches(dir string, cert *x509.Certificate) (bool, error) {
+	keyPath := filepath.Join(dir, hubKeyFile)
+	keyPEM, err := os.ReadFile(keyPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read %s: %w", keyPath, err)
+	}
+	key, err := parseKey(keyPEM)
+	if err != nil {
+		return false, nil
+	}
+	return verifyKeyPossession(cert, key) == nil, nil
+}
+
 func ensureBundle(dir string, ca *CA, a AgentRef, now time.Time, events *[]Event) error {
 	bundlePath := filepath.Join(dir, agentsDir, a.Name, bundleFile)
 	bundlePEM, err := os.ReadFile(bundlePath)
@@ -167,6 +222,10 @@ func ensureBundle(dir string, ca *CA, a AgentRef, now time.Time, events *[]Event
 		case needsRenewal(leaf, now):
 			return remintBundle(dir, ca, a, now, events, Renewed,
 				fmt.Sprintf("renewed bundle for agent %q; re-copy to install", a.Name))
+		case !ca.issued(leaf):
+			// ca.crt was replaced, so this bundle can no longer verify the hub.
+			return remintBundle(dir, ca, a, now, events, RemintedCA,
+				fmt.Sprintf("re-minted bundle for agent %q: the old one was signed by a previous CA; re-copy to install", a.Name))
 		default:
 			return nil
 		}
@@ -238,29 +297,32 @@ func caKeyMissingEvent(detail, name string) Event {
 	}
 }
 
+// writeCA and writeHub write the key before the cert. The cert's presence and
+// expiry decide whether to re-mint, so a crash between the two writes leaves a
+// state the next Bootstrap repairs or names, never a cert with no usable key.
 func writeCA(dir string, ca *CA) error {
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return fmt.Errorf("create certs dir: %w", err)
-	}
-	if err := writeFile(filepath.Join(dir, caCertFile), certToPEM(ca.Cert), pubPerm); err != nil {
-		return err
 	}
 	keyPEM, err := keyToPEM(ca.Key)
 	if err != nil {
 		return err
 	}
-	return writeFile(filepath.Join(dir, caKeyFile), keyPEM, privPerm)
+	if err := writeFile(filepath.Join(dir, caKeyFile), keyPEM, privPerm); err != nil {
+		return err
+	}
+	return writeFile(filepath.Join(dir, caCertFile), certToPEM(ca.Cert), pubPerm)
 }
 
 func writeHub(dir string, leaf *Leaf) error {
-	if err := writeFile(filepath.Join(dir, hubCertFile), certToPEM(leaf.Cert), pubPerm); err != nil {
-		return err
-	}
 	keyPEM, err := keyToPEM(leaf.Key)
 	if err != nil {
 		return err
 	}
-	return writeFile(filepath.Join(dir, hubKeyFile), keyPEM, privPerm)
+	if err := writeFile(filepath.Join(dir, hubKeyFile), keyPEM, privPerm); err != nil {
+		return err
+	}
+	return writeFile(filepath.Join(dir, hubCertFile), certToPEM(leaf.Cert), pubPerm)
 }
 
 func writeFile(path string, data []byte, perm os.FileMode) error {

@@ -523,14 +523,14 @@ func TestCertEventMessages(t *testing.T) {
 	n := f.notifier(st, "", nil)
 	ctx := context.Background()
 
-	n.NotifyBundleRenewed(ctx, "home")
+	n.NotifyBundleRenewed(ctx, "home", time.Now())
 	if got := f.last().hdr.Get("Tags"); got != "lock" {
 		t.Errorf("renewed Tags = %q, want lock", got)
 	}
 
-	n.NotifyBundleRemintedSAN(ctx, "home")
-	if got := f.last().body; !strings.Contains(got, "address changed") {
-		t.Errorf("reminted body = %q, want mention of address change", got)
+	n.NotifyBundleReissued(ctx, "home")
+	if got := f.last().body; !strings.Contains(got, "re-issued because") {
+		t.Errorf("reminted body = %q, want the re-issue reason", got)
 	}
 
 	n.NotifyCAKeyMissing(ctx, []string{"bundle for agent \"home\""})
@@ -543,6 +543,82 @@ func TestCertEventMessages(t *testing.T) {
 	}
 	if f.count() != 3 {
 		t.Errorf("publishes = %d, want 3", f.count())
+	}
+}
+
+func TestCAKeyMissingNotDeliveredWhenDisabled(t *testing.T) {
+	f := newFakeNtfy(t)
+	n := NewNotifier(f.client(""), openStore(t), quietLogger(), "", nil, nil)
+	if n.NotifyCAKeyMissing(context.Background(), []string{"hub cert renewal"}) {
+		t.Error("reported delivered with notifications off; the caller would set its once-only gate")
+	}
+	if f.count() != 0 {
+		t.Errorf("publishes = %d, want 0", f.count())
+	}
+}
+
+func TestRenewedPushStartsReminderClock(t *testing.T) {
+	f := newFakeNtfy(t)
+	st := openStore(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	staged := base.Add(3650 * 24 * time.Hour)
+	n := f.notifier(st, "", func(string) (time.Time, bool) { return staged, true })
+	if err := st.PutAgent(store.AgentStatus{Name: "home", LastOK: true, CertNotAfter: base.Add(30 * 24 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+
+	n.NotifyBundleRenewed(context.Background(), "home", base)
+	n.NotifyAgents(context.Background(), base.Add(time.Hour))
+	if f.count() != 1 {
+		t.Errorf("publishes = %d, want 1: the renewal push already said to copy the bundle", f.count())
+	}
+	n.NotifyAgents(context.Background(), base.Add(8*24*time.Hour))
+	if f.count() != 2 {
+		t.Errorf("publishes = %d after a week, want 2 (first weekly reminder)", f.count())
+	}
+}
+
+func TestReissueAlertRetriesUntilDelivered(t *testing.T) {
+	f := newFakeNtfy(t)
+	st := openStore(t)
+	n := f.notifier(st, "", nil)
+	if err := st.PutAgent(store.AgentStatus{Name: "home", LastOK: false, ConsecutiveFailures: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	f.setFail(true)
+	n.NotifyBundleReissued(context.Background(), "home")
+	n.NotifyAgents(context.Background(), time.Now())
+	if a, _, _ := st.GetAgent("home"); !a.ReissuePending {
+		t.Fatal("a failed re-issue alert was not kept pending")
+	}
+
+	f.setFail(false)
+	n.NotifyAgents(context.Background(), time.Now())
+	if got := f.last().body; !strings.Contains(got, "re-issued because") {
+		t.Errorf("retried body = %q, want the re-issue alert", got)
+	}
+	if a, _, _ := st.GetAgent("home"); a.ReissuePending {
+		t.Error("still pending after delivery")
+	}
+	sent := f.count()
+	n.NotifyAgents(context.Background(), time.Now())
+	if f.count() != sent {
+		t.Error("re-issue alert repeated after delivery")
+	}
+}
+
+func TestReminderGateSurvivesUnreadableBundle(t *testing.T) {
+	f := newFakeNtfy(t)
+	st := openStore(t)
+	sent := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := st.PutAgent(store.AgentStatus{Name: "home", LastOK: true, CertNotAfter: sent, LastRenewalReminder: sent}); err != nil {
+		t.Fatal(err)
+	}
+	n := f.notifier(st, "", func(string) (time.Time, bool) { return time.Time{}, false })
+	n.NotifyAgents(context.Background(), sent.Add(time.Hour))
+	if a, _, _ := st.GetAgent("home"); !a.LastRenewalReminder.Equal(sent) {
+		t.Errorf("LastRenewalReminder = %v, want kept: an unreadable bundle does not prove it was installed", a.LastRenewalReminder)
 	}
 }
 

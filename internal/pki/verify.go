@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -42,7 +43,7 @@ func verifyChain(leaf *x509.Certificate, pool *x509.CertPool, usage x509.ExtKeyU
 }
 
 // sanMatches reports whether cert's SANs include host (matched as an IP if host
-// parses as one, otherwise as a DNS name).
+// parses as one, otherwise as a case-insensitive DNS name, as TLS matches it).
 func sanMatches(cert *x509.Certificate, host string) bool {
 	if ip := net.ParseIP(host); ip != nil {
 		for _, cip := range cert.IPAddresses {
@@ -53,7 +54,7 @@ func sanMatches(cert *x509.Certificate, host string) bool {
 		return false
 	}
 	for _, dns := range cert.DNSNames {
-		if dns == host {
+		if strings.EqualFold(dns, host) {
 			return true
 		}
 	}

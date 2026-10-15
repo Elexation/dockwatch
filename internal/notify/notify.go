@@ -26,7 +26,7 @@ const (
 type UpdateInput struct {
 	Ref            string
 	Current        string   // running tag, e.g. "1.24.3" or "latest"
-	Latest         string   // newest tag matching the dw.tags filter, or the scheme heuristic when unset; "" if none
+	Latest         string   // newest tag strictly newer than Current, per the dw.tags filter or else the scheme heuristic; "" if none
 	UpdateKind     string   // major | minor | patch, when computable
 	RegistryDigest string   // registry index digest of the current tag
 	StaleHosts     []string // hosts whose running index digest differs from RegistryDigest
@@ -112,9 +112,11 @@ func (n *Notifier) NotifyUpdates(ctx context.Context, inputs []UpdateInput, now 
 // NotifyAgents runs the per-agent lifecycle pass over stored poll status: a
 // down alert after repeated failures (unless disabled for that agent), a
 // recovery on the first good poll after a down alert was sent, a
-// once-per-version wire-version mismatch, and a weekly reminder while a
-// renewed bundle is staged but not yet installed. It is meant to run after a
-// poll cycle, never concurrently with the pollers that write the same status.
+// once-per-version wire-version mismatch, a weekly reminder while a renewed
+// bundle is staged but not yet installed, and a retry of an undelivered
+// re-issue alert. It writes whole status records, so it must never overlap the
+// pollers or the renewal pass that write the same records; the scheduler runs
+// all three serially.
 func (n *Notifier) NotifyAgents(ctx context.Context, now time.Time) {
 	if !n.client.Enabled() {
 		return
@@ -163,12 +165,20 @@ func (n *Notifier) agentTransitions(ctx context.Context, a store.AgentStatus, no
 					changed = true
 				}
 			}
-		case !a.LastRenewalReminder.IsZero():
+		case ok && !a.LastRenewalReminder.IsZero():
 			// Agent now serves the staged cert: clear the gate, or the reminder
-			// timestamp keeps the agents-page warn flag lit forever.
+			// timestamp keeps the agents-page warn flag lit forever. An unreadable
+			// staged bundle proves nothing, so it leaves the gate alone.
 			a.LastRenewalReminder = time.Time{}
 			changed = true
 		}
+	}
+
+	// The re-issue alert failed when the bundle was re-minted. A reachable agent
+	// already serves the new bundle, so drop it; otherwise retry.
+	if a.ReissuePending && (a.LastOK || n.publish(ctx, reissuedMessage(a.Name))) {
+		a.ReissuePending = false
+		changed = true
 	}
 
 	if changed {
@@ -179,23 +189,41 @@ func (n *Notifier) agentTransitions(ctx context.Context, a store.AgentStatus, no
 }
 
 // NotifyBundleRenewed alerts that a renewed certificate bundle is ready to copy
-// to the named agent.
-func (n *Notifier) NotifyBundleRenewed(ctx context.Context, agent string) {
-	n.publish(ctx, Message{
+// to the named agent. Delivery starts the weekly staged-bundle reminder's clock,
+// so the first reminder lands a week later instead of repeating this on the next
+// cycle; a failed delivery leaves the clock unset, so that reminder is the retry.
+func (n *Notifier) NotifyBundleRenewed(ctx context.Context, agent string, now time.Time) {
+	if !n.publish(ctx, Message{
 		Title: "Certificate renewed for agent " + agent,
 		Body:  fmt.Sprintf("A renewed certificate bundle for agent %q is ready. Copy it to the agent and restart it.", agent),
 		Tags:  []string{"lock"},
-	})
+	}) {
+		return
+	}
+	found, err := n.store.UpdateAgent(agent, func(a *store.AgentStatus) { a.LastRenewalReminder = now })
+	switch {
+	case err != nil:
+		n.logger.Warn("persist renewal reminder", "agent", agent, "err", err)
+	case !found:
+		n.logger.Warn("no stored status for agent; the first staged-bundle reminder may repeat this alert", "agent", agent)
+	}
 }
 
-// NotifyBundleRemintedSAN alerts that the named agent's address changed, so its
-// certificate was re-issued and the new bundle must be copied over.
-func (n *Notifier) NotifyBundleRemintedSAN(ctx context.Context, agent string) {
-	n.publish(ctx, Message{
-		Title: "Certificate re-issued for agent " + agent,
-		Body:  fmt.Sprintf("Agent %q's address changed, so its certificate was re-issued. Copy the new bundle to the agent and restart it.", agent),
-		Tags:  []string{"lock"},
-	})
+// NotifyBundleReissued alerts that the named agent's bundle was re-minted, for a
+// new address or a new CA, and must be copied over. The agent cannot be reached
+// until then, which no other reminder covers, so a failed delivery is marked
+// pending and retried by NotifyAgents.
+func (n *Notifier) NotifyBundleReissued(ctx context.Context, agent string) {
+	if !n.client.Enabled() || n.publish(ctx, reissuedMessage(agent)) {
+		return
+	}
+	found, err := n.store.UpdateAgent(agent, func(a *store.AgentStatus) { a.ReissuePending = true })
+	switch {
+	case err != nil:
+		n.logger.Warn("persist pending re-issue alert", "agent", agent, "err", err)
+	case !found:
+		n.logger.Warn("no stored status for agent; the undelivered re-issue alert will not be retried", "agent", agent)
+	}
 }
 
 // NotifyCAKeyMissing alerts that minting is blocked because the CA key is
@@ -213,8 +241,12 @@ func (n *Notifier) NotifyCAKeyMissing(ctx context.Context, details []string) boo
 
 // publish sends m, filling in the click-through link, and reports whether
 // delivery succeeded. A failure is logged, not returned, so callers gate their
-// once-only state on the result and retry next cycle.
+// once-only state on the result and retry next cycle. With notifications off
+// nothing is delivered, so it reports false and no gate advances.
 func (n *Notifier) publish(ctx context.Context, m Message) bool {
+	if !n.client.Enabled() {
+		return false
+	}
 	if m.Click == "" {
 		m.Click = n.clickURL()
 	}
@@ -282,6 +314,14 @@ func wireMismatchMessage(name string, agentV int) Message {
 		Title: "Agent " + name + " version mismatch",
 		Body:  fmt.Sprintf("Agent %q reports wire version %d but the hub expects %d; update the agent or hub.", name, agentV, inventory.WireVersion),
 		Tags:  []string{"warning"},
+	}
+}
+
+func reissuedMessage(name string) Message {
+	return Message{
+		Title: "Certificate re-issued for agent " + name,
+		Body:  fmt.Sprintf("Agent %q's certificate was re-issued because its address or the hub's CA changed. Copy the new bundle to the agent and restart it.", name),
+		Tags:  []string{"lock"},
 	}
 }
 

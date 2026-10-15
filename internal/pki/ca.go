@@ -27,10 +27,28 @@ const (
 )
 
 // CA is a certificate authority. Key is nil when only the public ca.crt is
-// present (the operator may move ca.key off-machine).
+// present (the operator may move ca.key off-machine). Trusted holds every CA in
+// ca.crt (two during a rollover); Cert is the one Key signs with.
 type CA struct {
-	Cert *x509.Certificate
-	Key  *ecdsa.PrivateKey
+	Cert    *x509.Certificate
+	Key     *ecdsa.PrivateKey
+	Trusted []*x509.Certificate
+}
+
+// issued reports whether leaf was signed by any trusted CA, so a rollover's
+// second CA keeps its leaves until they renew rather than forcing every agent
+// to re-copy at once.
+func (ca *CA) issued(leaf *x509.Certificate) bool {
+	trusted := ca.Trusted
+	if len(trusted) == 0 {
+		trusted = []*x509.Certificate{ca.Cert}
+	}
+	for _, c := range trusted {
+		if leaf.CheckSignatureFrom(c) == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // MintCA creates a fresh CA certificate and signing key.
