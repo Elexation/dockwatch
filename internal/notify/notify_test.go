@@ -77,7 +77,7 @@ func (f *fakeNtfy) client(topic string) *Client {
 }
 
 func (f *fakeNtfy) notifier(st *store.Store, domain string, staged func(string) (time.Time, bool)) *Notifier {
-	return NewNotifier(f.client("topic"), st, quietLogger(), domain, staged)
+	return NewNotifier(f.client("topic"), st, quietLogger(), domain, staged, nil)
 }
 
 func TestUpdateNewerTagFiresOnceThenSilent(t *testing.T) {
@@ -226,7 +226,7 @@ func TestMultiHostListCapped(t *testing.T) {
 func TestDisabledNotifierIsNoop(t *testing.T) {
 	f := newFakeNtfy(t)
 	st := openStore(t)
-	n := NewNotifier(f.client(""), st, quietLogger(), "", nil) // no topic
+	n := NewNotifier(f.client(""), st, quietLogger(), "", nil, nil) // no topic
 
 	in := UpdateInput{Ref: "gitea/gitea:1.24.3", Current: "1.24.3", Latest: "1.25.0", UpdateKind: "minor", Hosts: []string{"home"}}
 	n.NotifyUpdates(context.Background(), []UpdateInput{in}, time.Now())
@@ -293,6 +293,38 @@ func TestAgentDownAfterThreshold(t *testing.T) {
 	n.NotifyAgents(context.Background(), time.Now())
 	if f.count() != 1 {
 		t.Errorf("publishes = %d while still down, want 1 (no repeat)", f.count())
+	}
+}
+
+func TestAgentDownAlertDisabledStaysSilent(t *testing.T) {
+	f := newFakeNtfy(t)
+	st := openStore(t)
+	n := NewNotifier(f.client("topic"), st, quietLogger(), "", nil, map[string]bool{"server": true})
+
+	if err := st.PutAgent(store.AgentStatus{Name: "server", LastOK: false, ConsecutiveFailures: downThreshold + 5}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutAgent(store.AgentStatus{Name: "home", LastOK: false, ConsecutiveFailures: downThreshold}); err != nil {
+		t.Fatal(err)
+	}
+	n.NotifyAgents(context.Background(), time.Now())
+	if f.count() != 1 {
+		t.Fatalf("publishes = %d, want 1 (home only)", f.count())
+	}
+	if got := f.last().body; !strings.Contains(got, `"home"`) {
+		t.Errorf("body = %q, want the alert for home, not server", got)
+	}
+	if a, _, _ := st.GetAgent("server"); a.DownNotified {
+		t.Error("DownNotified set for an agent with the down alert disabled")
+	}
+
+	// Back up with no down alert sent: no recovery message either.
+	if err := st.PutAgent(store.AgentStatus{Name: "server", LastOK: true}); err != nil {
+		t.Fatal(err)
+	}
+	n.NotifyAgents(context.Background(), time.Now())
+	if f.count() != 1 {
+		t.Errorf("publishes = %d after server came back, want 1 (no recovery without a down alert)", f.count())
 	}
 }
 

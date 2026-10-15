@@ -17,8 +17,9 @@ const intervalFloor = 5 * time.Minute
 
 // Agent is one hub-configured agent, derived from a DW_AGENT_<NAME>_URL var.
 type Agent struct {
-	Name string // operator-invented <NAME>, lowercased; the agent's name everywhere
-	URL  string // https://host:port
+	Name      string // operator-invented <NAME>, lowercased; the agent's name everywhere
+	URL       string // https://host:port
+	DownAlert bool   // DW_AGENT_<NAME>_DOWN_ALERT, default true; false for a host that is not always on
 }
 
 // Config is the fully parsed, validated DockWatch configuration.
@@ -50,7 +51,10 @@ func (c *Config) IsHub() bool { return c.Mode == "hub" }
 // IsAgent reports whether this process runs the agent role.
 func (c *Config) IsAgent() bool { return c.Mode == "agent" }
 
-var agentKeyRe = regexp.MustCompile(`^DW_AGENT_(.+)_URL$`)
+var (
+	agentKeyRe       = regexp.MustCompile(`^DW_AGENT_(.+)_URL$`)
+	agentDownAlertRe = regexp.MustCompile(`^DW_AGENT_(.+)_DOWN_ALERT$`)
+)
 
 var knownKeys = map[string]bool{
 	"DW_MODE": true, "DW_PORT": true, "DW_DATA": true, "DW_CERTS": true,
@@ -153,7 +157,7 @@ func warnings(env map[string]string, cfg *Config) []string {
 
 	var unknown []string
 	for k := range env {
-		if strings.HasPrefix(k, "DW_") && !knownKeys[k] && !agentKeyRe.MatchString(k) {
+		if strings.HasPrefix(k, "DW_") && !knownKeys[k] && !agentKeyRe.MatchString(k) && !agentDownAlertRe.MatchString(k) {
 			unknown = append(unknown, k)
 		}
 	}
@@ -185,9 +189,35 @@ func parseAgents(env map[string]string) ([]Agent, error) {
 			return nil, fmt.Errorf("duplicate agent name %q from %s and %s", name, prev, k)
 		}
 		seen[name] = k
-		agents = append(agents, Agent{Name: name, URL: v})
+		agents = append(agents, Agent{Name: name, URL: v, DownAlert: true})
 	}
 	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
+
+	byName := make(map[string]int, len(agents))
+	for i, a := range agents {
+		byName[a.Name] = i
+	}
+	seenAlert := make(map[string]string)
+	for k := range env {
+		m := agentDownAlertRe.FindStringSubmatch(k)
+		if m == nil {
+			continue
+		}
+		name := strings.ToLower(m[1])
+		i, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("%s set but no DW_AGENT_%s_URL configures agent %q", k, m[1], name)
+		}
+		if prev, dup := seenAlert[name]; dup {
+			return nil, fmt.Errorf("duplicate down-alert setting for agent %q from %s and %s", name, prev, k)
+		}
+		seenAlert[name] = k
+		on, err := parseBool(env, k, true)
+		if err != nil {
+			return nil, err
+		}
+		agents[i].DownAlert = on
+	}
 	return agents, nil
 }
 

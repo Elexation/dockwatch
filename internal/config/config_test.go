@@ -62,6 +62,30 @@ func TestAgents(t *testing.T) {
 	if cfg.Agents[0].URL != "https://10.27.27.8:7443" {
 		t.Errorf("home url = %q", cfg.Agents[0].URL)
 	}
+	if !cfg.Agents[0].DownAlert || !cfg.Agents[1].DownAlert {
+		t.Error("DownAlert defaults to false, want true")
+	}
+}
+
+func TestAgentDownAlert(t *testing.T) {
+	cfg, warns, err := Load([]string{
+		"DW_NTFY_TOPIC=x",
+		"DW_AGENT_HOME_URL=https://10.27.27.8:7443",
+		"DW_AGENT_NAS_URL=https://nas.lan:7443",
+		"DW_AGENT_NAS_DOWN_ALERT=false",
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !cfg.Agents[0].DownAlert {
+		t.Error("home DownAlert = false, want true (not set)")
+	}
+	if cfg.Agents[1].DownAlert {
+		t.Error("nas DownAlert = true, want false")
+	}
+	if len(warns) != 0 {
+		t.Errorf("warnings = %v, want none (DOWN_ALERT is a known key)", warns)
+	}
 }
 
 func TestFailFast(t *testing.T) {
@@ -79,6 +103,8 @@ func TestFailFast(t *testing.T) {
 		{"agent plaintext", []string{"DW_AGENT_X_URL=http://h:1"}, "DW_AGENT_X_URL"},
 		{"agent no port", []string{"DW_AGENT_X_URL=https://h"}, "DW_AGENT_X_URL"},
 		{"agent with path", []string{"DW_AGENT_X_URL=https://h:1/x"}, "DW_AGENT_X_URL"},
+		{"down alert no agent", []string{"DW_AGENT_Y_DOWN_ALERT=false"}, "DW_AGENT_Y_URL"},
+		{"down alert bad bool", []string{"DW_AGENT_X_URL=https://h:1", "DW_AGENT_X_DOWN_ALERT=off"}, "DW_AGENT_X_DOWN_ALERT"},
 		{"domain scheme", []string{"DW_DOMAIN=https://x.com"}, "DW_DOMAIN"},
 		{"domain port", []string{"DW_DOMAIN=x.com:8080"}, "DW_DOMAIN"},
 		{"bad bool", []string{"DW_HTTPS=maybe"}, "DW_HTTPS"},

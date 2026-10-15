@@ -47,17 +47,23 @@ type Notifier struct {
 	// ok=false when none is staged or it is unreadable. Injected so this package
 	// stays independent of the certificate code. May be nil (no cert reminders).
 	stagedExpiry func(agent string) (time.Time, bool)
+
+	// noDownAlert names agents whose host is not always on, so being
+	// unreachable is routine and not worth a push. May be nil.
+	noDownAlert map[string]bool
 }
 
 // NewNotifier builds a Notifier. domain is the bare hostname used to build a
-// click-through link; stagedExpiry may be nil to disable the cert reminder.
-func NewNotifier(client *Client, st *store.Store, logger *slog.Logger, domain string, stagedExpiry func(agent string) (time.Time, bool)) *Notifier {
+// click-through link; stagedExpiry may be nil to disable the cert reminder;
+// noDownAlert names agents that never get the unreachable alert.
+func NewNotifier(client *Client, st *store.Store, logger *slog.Logger, domain string, stagedExpiry func(agent string) (time.Time, bool), noDownAlert map[string]bool) *Notifier {
 	return &Notifier{
 		client:       client,
 		store:        st,
 		logger:       logger,
 		domain:       domain,
 		stagedExpiry: stagedExpiry,
+		noDownAlert:  noDownAlert,
 	}
 }
 
@@ -104,8 +110,9 @@ func (n *Notifier) NotifyUpdates(ctx context.Context, inputs []UpdateInput, now 
 }
 
 // NotifyAgents runs the per-agent lifecycle pass over stored poll status: a
-// down alert after repeated failures, a recovery on the first good poll after a
-// down, a once-per-version wire-version mismatch, and a weekly reminder while a
+// down alert after repeated failures (unless disabled for that agent), a
+// recovery on the first good poll after a down alert was sent, a
+// once-per-version wire-version mismatch, and a weekly reminder while a
 // renewed bundle is staged but not yet installed. It is meant to run after a
 // poll cycle, never concurrently with the pollers that write the same status.
 func (n *Notifier) NotifyAgents(ctx context.Context, now time.Time) {
@@ -126,7 +133,7 @@ func (n *Notifier) agentTransitions(ctx context.Context, a store.AgentStatus, no
 	changed := false
 
 	switch {
-	case !a.LastOK && a.ConsecutiveFailures >= downThreshold && !a.DownNotified:
+	case !a.LastOK && a.ConsecutiveFailures >= downThreshold && !a.DownNotified && !n.noDownAlert[a.Name]:
 		if n.publish(ctx, agentDownMessage(a.Name)) {
 			a.DownNotified = true
 			changed = true

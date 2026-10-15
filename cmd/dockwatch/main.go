@@ -162,8 +162,13 @@ func runHub(cfg *config.Config) {
 	// renamed or removed one would otherwise linger on the agents page and keep
 	// being evaluated for down alerts.
 	names := make([]string, 0, len(cfg.Agents))
+	noDownAlert := make(map[string]bool)
 	for _, a := range cfg.Agents {
 		names = append(names, a.Name)
+		if !a.DownAlert {
+			noDownAlert[a.Name] = true
+			slog.Info("unreachable alert disabled", "agent", a.Name)
+		}
 	}
 	if dropped, perr := st.PruneAgents(names); perr != nil {
 		slog.Warn("prune stored agent status", "err", perr)
@@ -176,7 +181,7 @@ func runHub(cfg *config.Config) {
 	// Build the notifier before Bootstrap so a startup cert renewal/remint can
 	// notify. It no-ops when DW_NTFY_TOPIC is unset, so building it is always safe.
 	ntfy := notify.NewClient(cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, nil)
-	notifier := notify.NewNotifier(ntfy, st, logger, cfg.Domain, stagedExpiry(cfg.CertsDir))
+	notifier := notify.NewNotifier(ntfy, st, logger, cfg.Domain, stagedExpiry(cfg.CertsDir), noDownAlert)
 
 	events, err := pki.Bootstrap(cfg.CertsDir, refs, time.Now())
 	handleCertEvents(context.Background(), events, notifier, st)

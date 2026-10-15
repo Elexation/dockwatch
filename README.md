@@ -62,6 +62,10 @@ Add one `DW_AGENT_<NAME>_URL` per remote machine to the hub, e.g.
 and run [compose.agent.yml](examples/compose.agent.yml) there. The agent serves a
 single mutual-TLS route and makes no outbound connections.
 
+For a machine that is not always on, set `DW_AGENT_<NAME>_DOWN_ALERT=false` to skip
+the "unreachable" notification for that agent. The dashboard still marks it
+unreachable, and every other notification about it still fires.
+
 Optional defense in depth: restrict the agent port (7443) to the hub's IP in the host
 firewall. DockWatch is secure without it (mutual TLS), but the rule is free.
 
