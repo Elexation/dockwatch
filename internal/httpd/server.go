@@ -19,6 +19,7 @@ const (
 	themeCookie   = "dw_theme"
 	layoutCookie  = "dw_layout"
 	defaultTTL    = 30 * 24 * time.Hour // sliding session lifetime
+	maxBodyBytes  = 16 << 10            // every POST is a short form or empty
 )
 
 // LocalReader is the dashboard's slice of inventory.Reader (an interface for testing).
@@ -59,10 +60,11 @@ type Config struct {
 
 // Server is the hub's web UI handler.
 type Server struct {
-	cfg Config
-	mux *http.ServeMux
-	now func() time.Time
-	ttl time.Duration
+	cfg     Config
+	handler http.Handler
+	now     func() time.Time
+	ttl     time.Duration
+	guard   *authGuard
 }
 
 // New builds a Server with its routes registered.
@@ -74,7 +76,7 @@ func New(cfg Config) *Server {
 	if ttl == 0 {
 		ttl = defaultTTL
 	}
-	s := &Server{cfg: cfg, now: cfg.Now, ttl: ttl}
+	s := &Server{cfg: cfg, now: cfg.Now, ttl: ttl, guard: newAuthGuard(cfg.Now)}
 	s.routes()
 	return s
 }
@@ -98,8 +100,10 @@ func (s *Server) routes() {
 	if s.cfg.StaticFS != nil {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(s.cfg.StaticFS)))
 	}
-	s.mux = mux
+	// SameSite=Strict still sends the session cookie from sibling subdomains;
+	// the cross-origin check rejects those POSTs too.
+	s.handler = http.MaxBytesHandler(http.NewCrossOriginProtection().Handler(mux), maxBodyBytes)
 }
 
 // Handler returns the routed handler.
-func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) Handler() http.Handler { return s.handler }

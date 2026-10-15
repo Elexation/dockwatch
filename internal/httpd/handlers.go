@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elexation/dockwatch/internal/auth"
 	"github.com/elexation/dockwatch/internal/inventory"
 	"github.com/elexation/dockwatch/internal/store"
 	"github.com/elexation/dockwatch/internal/web"
@@ -52,7 +51,11 @@ func (s *Server) setupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := auth.Hash(pw)
+	hash, err := s.guard.hash(r.Context(), pw)
+	if code, _ := refusal(w, err); code != 0 {
+		http.Error(w, http.StatusText(code), code)
+		return
+	}
 	if err != nil {
 		s.fail(w, "hash password", err)
 		return
@@ -111,14 +114,21 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	// Verify even on a wrong username, so timing does not leak account existence.
 	ok := false
 	if found {
-		match, verr := auth.Verify(admin.Hash, pw)
+		match, verr := s.guard.verify(r.Context(), admin.Hash, pw)
+		if code, banner := refusal(w, verr); code != 0 {
+			w.WriteHeader(code)
+			s.renderLogin(w, web.LoginVM{Theme: themeFrom(r), Banner: banner, Fields: loginFields(username)})
+			return
+		}
 		ok = verr == nil && match && username == admin.Username
 	}
 	if !ok {
+		s.guard.failed()
 		w.WriteHeader(http.StatusUnauthorized)
 		s.renderLogin(w, web.LoginVM{Theme: themeFrom(r), Banner: "Incorrect username or password", Fields: loginFields(username)})
 		return
 	}
+	s.guard.succeeded()
 	if err := s.startSession(w, admin); err != nil {
 		s.fail(w, "start session", err)
 		return
@@ -163,8 +173,16 @@ func (s *Server) passwordSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	match, verr := auth.Verify(admin.Hash, current)
+	// Shares the login's failure count: a stolen session must not become a
+	// second, unthrottled way to guess the password.
+	match, verr := s.guard.verify(r.Context(), admin.Hash, current)
+	if code, banner := refusal(w, verr); code != 0 {
+		w.WriteHeader(code)
+		s.renderSettings(w, web.SettingsVM{Chrome: s.chrome(r, "settings"), Banner: banner, Fields: passwordFields("", "", "")})
+		return
+	}
 	if verr != nil || !match {
+		s.guard.failed()
 		slog.Warn("password change rejected: wrong current password")
 		w.WriteHeader(http.StatusUnauthorized)
 		s.renderSettings(w, web.SettingsVM{
@@ -174,6 +192,7 @@ func (s *Server) passwordSubmit(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	s.guard.succeeded()
 
 	pwErr, confirmErr := validatePassword(pw, confirm, current)
 	if pwErr != "" || confirmErr != "" {
@@ -185,7 +204,12 @@ func (s *Server) passwordSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := auth.Hash(pw)
+	hash, err := s.guard.hash(r.Context(), pw)
+	if code, banner := refusal(w, err); code != 0 {
+		w.WriteHeader(code)
+		s.renderSettings(w, web.SettingsVM{Chrome: s.chrome(r, "settings"), Banner: banner, Fields: passwordFields("", "", "")})
+		return
+	}
 	if err != nil {
 		s.fail(w, "hash password", err)
 		return

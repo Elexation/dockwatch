@@ -18,8 +18,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           s.mux,
+		Handler:           s.handler,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
 	}
 
 	go func() {

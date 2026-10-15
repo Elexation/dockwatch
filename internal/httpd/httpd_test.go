@@ -384,6 +384,58 @@ func TestPasswordChangeRejects(t *testing.T) {
 	}
 }
 
+func TestLoginThrottlesRepeatedFailures(t *testing.T) {
+	now := time.Now()
+	s, st := newTestServerWith(t, false, func(c *Config) { c.Now = func() time.Time { return now } })
+	seedAdmin(t, st, "admin", "hunter2pass")
+	wrong := url.Values{"username": {"admin"}, "password": {"wrongpass1"}}
+	right := url.Values{"username": {"admin"}, "password": {"hunter2pass"}}
+
+	for i := 0; i <= freeFailures; i++ {
+		if rec := do(s, "POST", "/login", wrong); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("wrong attempt %d: code=%d, want 401", i+1, rec.Code)
+		}
+	}
+	// Blocked now, so even the right password is refused unchecked.
+	rec := do(s, "POST", "/login", right)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != "1" {
+		t.Fatalf("during block: code=%d retry-after=%q, want 429 and 1", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	if c := sessionCookieOf(rec); c != nil && c.Value != "" {
+		t.Error("blocked attempt set a session cookie")
+	}
+
+	now = now.Add(2 * time.Second)
+	wantRedirect(t, do(s, "POST", "/login", right), "/")
+}
+
+func TestCrossOriginPostRejected(t *testing.T) {
+	s, _ := newTestServer(t, false)
+	for site, want := range map[string]int{
+		"cross-site":  http.StatusForbidden,
+		"same-site":   http.StatusForbidden, // a sibling subdomain, which SameSite lets through
+		"same-origin": http.StatusSeeOther,
+	} {
+		req := httptest.NewRequest("POST", "/logout", nil)
+		req.Header.Set("Sec-Fetch-Site", site)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("Sec-Fetch-Site %s: code=%d, want %d", site, rec.Code, want)
+		}
+	}
+}
+
+func TestOversizedFormRejected(t *testing.T) {
+	s, st := newTestServer(t, false)
+	seedAdmin(t, st, "admin", "hunter2pass")
+	// Valid credentials, so only the size cap can turn this away.
+	form := url.Values{"username": {"admin"}, "password": {"hunter2pass"}, "pad": {strings.Repeat("x", maxBodyBytes)}}
+	if rec := do(s, "POST", "/login", form); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("oversized login: code=%d, want 401", rec.Code)
+	}
+}
+
 func TestCookieFlags(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
