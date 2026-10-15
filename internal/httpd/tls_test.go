@@ -87,7 +87,7 @@ func TestTLSRedirectListener(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	_, port, _ := net.SplitHostPort(raw.Addr().String())
-	ln := newTLSRedirectListener(raw, tlsCfg, port, "", false)
+	ln := newTLSRedirectListener(raw, tlsCfg, "", false)
 
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -123,6 +123,39 @@ func TestTLSRedirectListener(t *testing.T) {
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("tls status = %d, want 200", resp2.StatusCode)
+	}
+}
+
+func TestRedirectTarget(t *testing.T) {
+	for _, tc := range []struct {
+		host, domain string
+		proxy        bool
+		want         string
+	}{
+		// Docker maps 9443 to the container's port; the client's port is the right one.
+		{"pi.lan:9443", "", false, "https://pi.lan:9443/x"},
+		{"pi.lan", "", false, "https://pi.lan:80/x"},
+		{"pi.lan:443", "", false, "https://pi.lan/x"},
+		{"pi.lan:8080", "dw.example.com", false, "https://dw.example.com:8080/x"},
+		{"pi.lan:8080", "", true, "https://pi.lan/x"},
+		{"[fd00::5]:8080", "", false, "https://[fd00::5]:8080/x"},
+		{"[fd00::5]:8080", "", true, "https://[fd00::5]/x"},
+		{"[::1]", "", false, "https://[::1]:80/x"},
+	} {
+		if got, ok := redirectTarget(tc.host, "/x", tc.domain, tc.proxy); !ok || got != tc.want {
+			t.Errorf("redirectTarget(%q, domain=%q, proxy=%v) = %q, %v; want %q", tc.host, tc.domain, tc.proxy, got, ok, tc.want)
+		}
+	}
+
+	// A non-numeric port would move the authority: "dw.example.com:@evil.example" is host evil.example.
+	for _, host := range []string{"x:@evil.example", "x:443@evil.example", "pi.lan:0", "pi.lan:70000"} {
+		if got, ok := redirectTarget(host, "/x", "dw.example.com", false); ok {
+			t.Errorf("redirectTarget(%q) = %q, want the request dropped", host, got)
+		}
+	}
+	// A request-target without a leading slash must not extend the authority.
+	if got, _ := redirectTarget("pi.lan:8080", "@evil.example", "dw.example.com", true); got != "https://dw.example.com/" {
+		t.Errorf("slashless target = %q, want https://dw.example.com/", got)
 	}
 }
 

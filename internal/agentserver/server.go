@@ -111,7 +111,9 @@ func (s *Server) Close() error {
 
 // handshakeLogWriter rate-limits TLS-handshake-error lines from http.Server's
 // ErrorLog so a misconfigured or scanning client surfaces as periodic log noise,
-// never a flood and never silence. Other error lines pass through unchanged.
+// never a flood. The container health probe's own loopback connect is dropped
+// outright: it fires every 30s and would otherwise bury the real failures. Other
+// error lines pass through unchanged.
 type handshakeLogWriter struct {
 	logger *slog.Logger
 
@@ -125,6 +127,9 @@ func (w *handshakeLogWriter) Write(p []byte) (int, error) {
 	line := strings.TrimRight(string(p), "\n")
 	if !strings.Contains(line, "TLS handshake error") {
 		w.logger.Warn(line)
+		return len(p), nil
+	}
+	if isHealthProbe(line) {
 		return len(p), nil
 	}
 
@@ -146,4 +151,23 @@ func (w *handshakeLogWriter) Write(p []byte) (int, error) {
 		w.suppressed++
 	}
 	return len(p), nil
+}
+
+// isHealthProbe reports whether a handshake-error line is `dockwatch health`: a
+// loopback connect that closes before sending a byte, which net/http logs as EOF.
+func isHealthProbe(line string) bool {
+	rest, ok := strings.CutPrefix(line, "http: TLS handshake error from ")
+	if !ok {
+		return false
+	}
+	addr, ok := strings.CutSuffix(rest, ": EOF")
+	if !ok {
+		return false
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

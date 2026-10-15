@@ -18,14 +18,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	uiCertValidity   = 10 * 365 * 24 * time.Hour
-	uiCertBackdate   = 24 * time.Hour
-	peekReadDeadline = 5 * time.Second
+	uiCertValidity     = 10 * 365 * 24 * time.Hour
+	uiCertBackdate     = 24 * time.Hour
+	peekReadDeadline   = 5 * time.Second
+	maxRedirectRequest = 64 << 10 // http.Server's MaxHeaderBytes never sees this path; cookies from sibling services count too
 )
 
 // resolveUICert returns the cert and key paths for the UI TLS listener.
@@ -188,7 +191,6 @@ func certFingerprint(certFile string) string {
 type tlsRedirectListener struct {
 	net.Listener
 	tlsCfg       *tls.Config
-	port         string
 	domain       string
 	trustedProxy bool
 
@@ -198,11 +200,10 @@ type tlsRedirectListener struct {
 	closed    chan struct{}
 }
 
-func newTLSRedirectListener(ln net.Listener, cfg *tls.Config, port, domain string, trustedProxy bool) net.Listener {
+func newTLSRedirectListener(ln net.Listener, cfg *tls.Config, domain string, trustedProxy bool) net.Listener {
 	l := &tlsRedirectListener{
 		Listener:     ln,
 		tlsCfg:       cfg,
-		port:         port,
 		domain:       domain,
 		trustedProxy: trustedProxy,
 		conns:        make(chan net.Conn),
@@ -249,7 +250,7 @@ func (l *tlsRedirectListener) dispatch(conn net.Conn) {
 
 	pc := newPrefixConn(conn, buf[:])
 	if buf[0] != 0x16 {
-		redirectHTTP(pc, l.port, l.domain, l.trustedProxy)
+		redirectHTTP(pc, l.domain, l.trustedProxy)
 		return
 	}
 	select {
@@ -276,35 +277,51 @@ func (l *tlsRedirectListener) Close() error {
 }
 
 // redirectHTTP answers a single plaintext HTTP request with a 301 to its https
-// equivalent, preferring the canonical domain when set. With a trusted proxy or
-// the standard 443 port the port is omitted from the target.
-func redirectHTTP(conn net.Conn, port, domain string, trustedProxy bool) {
+// equivalent, preferring the canonical domain when set.
+func redirectHTTP(conn net.Conn, domain string, trustedProxy bool) {
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(peekReadDeadline))
 
-	req, err := http.ReadRequest(bufio.NewReader(conn))
-	if err != nil {
+	req, err := http.ReadRequest(bufio.NewReader(io.LimitReader(conn, maxRedirectRequest)))
+	if err != nil || req.Host == "" {
 		return
 	}
-	host := req.Host
-	if host == "" {
+	target, ok := redirectTarget(req.Host, req.URL.RequestURI(), domain, trustedProxy)
+	if !ok {
 		return
 	}
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+	body := "Redirecting to " + target + "\n"
+	fmt.Fprintf(conn, "HTTP/1.1 301 Moved Permanently\r\nLocation: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", target, len(body), body)
+}
+
+// redirectTarget builds the https URL for a plaintext request's Host header.
+// Plain and TLS share one listener, so the port the client reached is the https
+// port too, and a Host without one means the http default, 80; the container's
+// own port is no guide once Docker maps it. With a trusted proxy or port 443 the
+// port is omitted. ok is false for a Host whose port is not a number: one like
+// "x:@evil.example" would otherwise carry the authority off the pinned domain.
+func redirectTarget(hostHeader, uri, domain string, trustedProxy bool) (target string, ok bool) {
+	host, port := strings.TrimSuffix(strings.TrimPrefix(hostHeader, "["), "]"), "80"
+	if h, p, err := net.SplitHostPort(hostHeader); err == nil {
+		if n, perr := strconv.Atoi(p); perr != nil || n < 1 || n > 65535 {
+			return "", false
+		}
+		host, port = h, p
 	}
 	if domain != "" {
 		host = domain
 	}
-
-	var target string
-	if trustedProxy || port == "443" {
-		target = "https://" + host + req.URL.RequestURI()
-	} else {
-		target = "https://" + net.JoinHostPort(host, port) + req.URL.RequestURI()
+	// A request-target like "@evil.example" would land straight after the host.
+	if !strings.HasPrefix(uri, "/") {
+		uri = "/"
 	}
-	body := "Redirecting to " + target + "\n"
-	fmt.Fprintf(conn, "HTTP/1.1 301 Moved Permanently\r\nLocation: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", target, len(body), body)
+	if trustedProxy || port == "443" {
+		if strings.Contains(host, ":") {
+			host = "[" + host + "]"
+		}
+		return "https://" + host + uri, true
+	}
+	return "https://" + net.JoinHostPort(host, port) + uri, true
 }
 
 // prefixConn re-prepends bytes already read off a conn (the peeked first byte) so

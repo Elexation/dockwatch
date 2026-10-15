@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -52,7 +51,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	listener := newTLSRedirectListener(ln, tlsCfg, strconv.Itoa(s.cfg.Port), s.cfg.Domain, s.cfg.TrustedProxy)
+	listener := newTLSRedirectListener(ln, tlsCfg, s.cfg.Domain, s.cfg.TrustedProxy)
 	slog.Info("web UI listening", "addr", addr, "tls", true)
 	return ignoreClosed(srv.Serve(listener))
 }

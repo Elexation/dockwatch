@@ -30,6 +30,10 @@ func (fakeDocker) ContainerList(context.Context, client.ContainerListOptions) (c
 	return client.ContainerListResult{}, nil
 }
 
+func (fakeDocker) ContainerInspect(context.Context, string, client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	return client.ContainerInspectResult{}, nil
+}
+
 func (fakeDocker) ImageInspect(context.Context, string, ...client.ImageInspectOption) (client.ImageInspectResult, error) {
 	return client.ImageInspectResult{}, nil
 }
