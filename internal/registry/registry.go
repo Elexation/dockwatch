@@ -75,17 +75,28 @@ func (c *Client) Created(ctx context.Context, ref string) (time.Time, error) {
 	return cf.Created.Time, nil
 }
 
-// Digest returns the index digest ref resolves to, matching Docker's repo digest so the two compare directly.
+// Digest returns the index digest ref resolves to, matching Docker's repo digest
+// so the two compare directly. It asks with HEAD, because Docker Hub counts a
+// manifest GET against its anonymous pull limit and a HEAD not.
 func (c *Client) Digest(ctx context.Context, ref string) (string, error) {
 	r, err := name.ParseReference(ref)
 	if err != nil {
 		return "", fmt.Errorf("parse reference %q: %w", ref, err)
 	}
-	desc, err := remote.Get(r, c.opts(ctx)...)
+	desc, err := remote.Head(r, c.opts(ctx)...)
+	if err == nil {
+		return desc.Digest.String(), nil
+	}
+	// A status a GET would only repeat is final; anything else, such as a
+	// missing digest header or a registry refusing HEAD, gets one GET.
+	if cerr := classify(err); errors.Is(cerr, ErrAuthRequired) || errors.Is(cerr, ErrRateLimited) || errors.Is(cerr, ErrNotFound) {
+		return "", cerr
+	}
+	full, err := remote.Get(r, c.opts(ctx)...)
 	if err != nil {
 		return "", classify(err)
 	}
-	return desc.Digest.String(), nil
+	return full.Digest.String(), nil
 }
 
 func (c *Client) opts(ctx context.Context) []remote.Option {

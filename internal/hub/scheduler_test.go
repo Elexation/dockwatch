@@ -392,6 +392,116 @@ func TestRunCycleRepublishedCarry(t *testing.T) {
 	}
 }
 
+func TestRunCycleCreatedRateLimitPausesOnlyDateLookups(t *testing.T) {
+	refs := []string{"nginx:latest", "redis:latest"}
+	reg := &fakeReg{
+		digests:    map[string]string{refs[0]: "sha256:d1", refs[1]: "sha256:d1"},
+		createdErr: registry.ErrRateLimited,
+	}
+	local := fixedLocal{containers: []inventory.Container{
+		{Image: refs[0], State: "running", RepoDigests: []string{"repo@sha256:local"}},
+		{Image: refs[1], State: "running", RepoDigests: []string{"repo@sha256:local"}},
+	}}
+	st := openStore(t)
+	s := newPipelineScheduler(t, local, reg, st)
+	s.runCycle(context.Background(), false)
+
+	// The date lookup is a counted GET; its 429 must not stop the uncounted HEAD checks.
+	if reg.digN != 2 || reg.createdN != 1 {
+		t.Errorf("digN=%d createdN=%d, want 2 and 1: only date lookups pause after a Created 429", reg.digN, reg.createdN)
+	}
+	for _, ref := range refs {
+		got, _, _ := st.GetCheck(ref)
+		if got.Status != store.StatusOK || got.RegistryDigest != "sha256:d1" || !got.RepublishedAt.IsZero() {
+			t.Errorf("%s = %+v, want ok with the digest and no date, so the next check refetches it", ref, got)
+		}
+	}
+
+	// Once the limit lifts, the dates are fetched for the same digests.
+	built := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	reg.createdErr = nil
+	reg.created = map[string]time.Time{refs[0]: built, refs[1]: built}
+	s.runCycle(context.Background(), true)
+	for _, ref := range refs {
+		if got, _, _ := st.GetCheck(ref); !got.RepublishedAt.Equal(built) || got.RepublishedEstimated {
+			t.Errorf("%s after the limit = %v estimated=%v, want %v from the registry", ref, got.RepublishedAt, got.RepublishedEstimated, built)
+		}
+	}
+}
+
+func TestRunCycleCreatedDeadlineRetries(t *testing.T) {
+	const ref = "nginx:latest"
+	reg := &fakeReg{digests: map[string]string{ref: "sha256:d1"}}
+	local := fixedLocal{containers: []inventory.Container{
+		{Image: ref, State: "running", RepoDigests: []string{"repo@sha256:local"}},
+	}}
+	st := openStore(t)
+	s := newPipelineScheduler(t, local, reg, st)
+	// The per-ref budget runs out during the date lookup.
+	s.regTimeout = 20 * time.Millisecond
+	s.reg = hangOnCreated{reg}
+	s.runCycle(context.Background(), false)
+	got, _, _ := st.GetCheck(ref)
+	if got.Status != store.StatusOK || !got.RepublishedAt.IsZero() {
+		t.Errorf("got %q date=%v estimated=%v, want ok with the date unset so the next check retries",
+			got.Status, got.RepublishedAt, got.RepublishedEstimated)
+	}
+}
+
+// hangOnCreated blocks the date lookup until the per-ref deadline passes.
+type hangOnCreated struct{ *fakeReg }
+
+func (h hangOnCreated) Created(ctx context.Context, _ string) (time.Time, error) {
+	<-ctx.Done()
+	return time.Time{}, ctx.Err()
+}
+
+func TestRunCycleSkipsStoreAfterShutdown(t *testing.T) {
+	const ref = "nginx:latest"
+	reg := &fakeReg{digests: map[string]string{ref: "sha256:d1"}}
+	local := fixedLocal{containers: []inventory.Container{
+		{Image: ref, State: "running", RepoDigests: []string{"repo@sha256:local"}},
+	}}
+	st := openStore(t)
+	s := newPipelineScheduler(t, local, reg, st)
+	ctx, cancel := context.WithCancel(context.Background())
+	// Shutdown lands while the registry call is in flight.
+	s.reg = cancelOnDigest{fakeReg: reg, cancel: cancel}
+	s.runCycle(ctx, false)
+	if _, found, _ := st.GetCheck(ref); found {
+		t.Error("a check finished after shutdown was stored")
+	}
+}
+
+type cancelOnDigest struct {
+	*fakeReg
+	cancel context.CancelFunc
+}
+
+func (c cancelOnDigest) Digest(ctx context.Context, ref string) (string, error) {
+	c.cancel()
+	return c.fakeReg.Digest(ctx, ref)
+}
+
+func TestDedupMergesSpellings(t *testing.T) {
+	st := openStore(t)
+	s := newPipelineScheduler(t, emptyLocal{}, &fakeReg{}, st)
+	c := func(image string) inventory.Container {
+		return inventory.Container{Image: image, State: "running", RepoDigests: []string{"nginx@sha256:x"}}
+	}
+	refs := s.dedup([]inventory.Inventory{
+		{Host: "a", Containers: []inventory.Container{c("nginx")}},
+		{Host: "b", Containers: []inventory.Container{c("docker.io/library/nginx:latest")}},
+	})
+	agg, ok := refs["nginx:latest"]
+	if len(refs) != 1 || !ok {
+		t.Fatalf("refs = %v, want one canonical nginx:latest", refs)
+	}
+	if len(agg.hosts) != 2 || agg.byHost["b"] != "sha256:x" {
+		t.Errorf("hosts=%v byHost=%v, want both hosts with their digests", agg.hosts, agg.byHost)
+	}
+}
+
 func TestDedupTagFilterConflict(t *testing.T) {
 	st := openStore(t)
 	s := newPipelineScheduler(t, emptyLocal{}, &fakeReg{}, st)

@@ -15,14 +15,27 @@ type fakeDocker struct {
 	listErr      error
 	inspect      map[string]client.ImageInspectResult
 	inspectCalls int
+	configImage  map[string]string  // container ID -> Config.Image
+	onInspect    context.CancelFunc // called on each image inspect, to simulate a deadline mid-read
 }
 
 func (f *fakeDocker) ContainerList(_ context.Context, _ client.ContainerListOptions) (client.ContainerListResult, error) {
 	return f.list, f.listErr
 }
 
+func (f *fakeDocker) ContainerInspect(_ context.Context, id string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	img, ok := f.configImage[id]
+	if !ok {
+		return client.ContainerInspectResult{}, errors.New("no such container")
+	}
+	return client.ContainerInspectResult{Container: container.InspectResponse{Config: &container.Config{Image: img}}}, nil
+}
+
 func (f *fakeDocker) ImageInspect(_ context.Context, id string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
 	f.inspectCalls++
+	if f.onInspect != nil {
+		f.onInspect()
+	}
 	return f.inspect[id], nil
 }
 
@@ -97,6 +110,40 @@ func TestReadHappyPath(t *testing.T) {
 	}
 	if len(c.Labels) != 1 || c.Labels["dw.watch"] != "false" {
 		t.Errorf("Labels = %v, want only dw.* kept", c.Labels)
+	}
+}
+
+func TestReadRecoversRefFromImageID(t *testing.T) {
+	// After a pull without a recreate, the list reports the image ID, not the name.
+	moved := summary("web", "sha256:0ld", "sha256:0ld", nil, "")
+	moved.ID = "c1"
+	f := &fakeDocker{
+		list:        client.ContainerListResult{Items: []container.Summary{moved}},
+		configImage: map[string]string{"c1": "nginx:1.27"},
+	}
+	inv, err := NewReader(f, "local").Read(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := inv.Containers[0].Image; got != "nginx:1.27" {
+		t.Errorf("Image = %q, want the name the container was run with", got)
+	}
+}
+
+func TestReadDeadlineMidLoopIsUnavailable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := &fakeDocker{
+		list: client.ContainerListResult{Items: []container.Summary{
+			summary("a", "img:1", "sha256:a", nil, ""),
+			summary("b", "img:2", "sha256:b", nil, ""),
+		}},
+		onInspect: cancel,
+	}
+	inv, err := NewReader(f, "home").Read(ctx)
+	if err == nil || inv.Docker != DockerUnavailable || len(inv.Containers) != 0 {
+		t.Errorf("got docker=%q containers=%d err=%v, want unavailable with none: a partial read would read as local builds",
+			inv.Docker, len(inv.Containers), err)
 	}
 }
 

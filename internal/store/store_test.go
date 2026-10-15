@@ -208,3 +208,28 @@ func TestPersistsAcrossReopen(t *testing.T) {
 		t.Errorf("entry not persisted across reopen")
 	}
 }
+
+func TestPruneChecksAndNotified(t *testing.T) {
+	s := openTemp(t)
+	for _, ref := range []string{"nginx", "nginx:latest"} {
+		if err := s.PutCheck(CheckResult{Ref: ref, Status: StatusOK}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PutNotified(NotifiedState{Ref: ref}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep := func(ref string) bool { return ref == "nginx:latest" }
+	if n, err := s.PruneChecks(keep); err != nil || n != 1 {
+		t.Errorf("PruneChecks = %d, %v; want 1", n, err)
+	}
+	if n, err := s.PruneNotified(keep); err != nil || n != 1 {
+		t.Errorf("PruneNotified = %d, %v; want 1", n, err)
+	}
+	if _, found, _ := s.GetCheck("nginx"); found {
+		t.Error("old-spelling check survived")
+	}
+	if _, found, _ := s.GetNotified("nginx:latest"); !found {
+		t.Error("canonical notified state was dropped")
+	}
+}

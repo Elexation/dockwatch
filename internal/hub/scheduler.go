@@ -2,14 +2,17 @@ package hub
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math/rand/v2"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/elexation/dockwatch/internal/inventory"
 	"github.com/elexation/dockwatch/internal/notify"
+	"github.com/elexation/dockwatch/internal/registry"
 	"github.com/elexation/dockwatch/internal/store"
 	"github.com/google/go-containerregistry/pkg/name"
 )
@@ -18,6 +21,10 @@ const (
 	startupJitter = 60 * time.Second
 	imageJitter   = 250 * time.Millisecond
 	renewEvery    = 24 * time.Hour
+	// registryTimeout bounds one ref's registry calls. The library's transport has
+	// no response timeout, so a registry that accepts and never answers would
+	// otherwise stall this cycle and every later one.
+	registryTimeout = 30 * time.Second
 )
 
 // schedTimer abstracts time.Timer so the loop is drivable without wall-clock waits in tests.
@@ -51,11 +58,16 @@ type Scheduler struct {
 	renew    func()           // opaque cert-renewal closure; keeps this package off pki
 	notifier *notify.Notifier // nil for a hub built without notifications
 
-	cycle     func(ctx context.Context, force bool)
-	newTimer  func(d time.Duration) schedTimer
-	startup   func() time.Duration
-	imgJitter func() time.Duration
-	sleep     func(ctx context.Context, d time.Duration)
+	// passMu keeps the renewal pass and the check cycle from overlapping: both
+	// write agent status records, and the cycle's writers replace whole records.
+	passMu sync.Mutex
+
+	cycle      func(ctx context.Context, force bool)
+	newTimer   func(d time.Duration) schedTimer
+	startup    func() time.Duration
+	imgJitter  func() time.Duration
+	sleep      func(ctx context.Context, d time.Duration)
+	regTimeout time.Duration
 }
 
 // NewScheduler wires the cycle dependencies; renew may be nil for a local-only
@@ -76,6 +88,7 @@ func NewScheduler(p *Poller, reg RegistryClient, st *store.Store, logger *slog.L
 	s.startup = func() time.Duration { return jitter(startupJitter) }
 	s.imgJitter = func() time.Duration { return jitter(imageJitter) }
 	s.sleep = sleepCtx
+	s.regTimeout = registryTimeout
 	return s
 }
 
@@ -145,7 +158,9 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 func (s *Scheduler) fire(ctx context.Context) {
 	s.running.Store(true)
+	s.passMu.Lock()
 	s.cycle(ctx, s.force.Swap(false))
+	s.passMu.Unlock()
 	s.running.Store(false)
 	s.lastDone.Store(time.Now().UnixNano())
 }
@@ -174,7 +189,9 @@ func (s *Scheduler) runRenewals(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			s.passMu.Lock()
 			s.renew()
+			s.passMu.Unlock()
 		}
 	}
 }
@@ -184,7 +201,8 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 	refs := s.dedup(s.poller.Gather(ctx, now))
 
 	var inputs []notify.UpdateInput
-	cooled := make(map[string]bool) // registries that returned 429 this cycle
+	cooled := make(map[string]bool)     // registries that returned 429 this cycle
+	dateCooled := make(map[string]bool) // registries whose build-date lookup returned 429 this cycle
 	first := true
 	for ref, agg := range refs {
 		if ctx.Err() != nil {
@@ -213,12 +231,27 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 		}
 		first = false
 
-		res := Check(ctx, s.reg, ref, agg.tagFilter, now)
-		s.stampRepublished(ctx, ref, prev, &res, now)
+		rctx, cancel := context.WithTimeout(ctx, s.regTimeout)
+		res := Check(rctx, s.reg, ref, agg.tagFilter, now)
+		serr := s.stampRepublished(rctx, ref, prev, &res, now, dateCooled[host])
+		cancel()
 		if res.Status == store.StatusRateLimited {
 			cooled[host] = true
 		}
+		// The build-date lookup is a counted manifest GET; the checks use an
+		// uncounted HEAD, so a 429 here pauses only further date lookups.
+		if errors.Is(serr, registry.ErrRateLimited) {
+			dateCooled[host] = true
+		}
+		if ctx.Err() != nil {
+			return // the result records the shutdown, not the registry
+		}
 		s.put(res)
+		// Once per new error: failed checks retry every cycle, and the dashboard
+		// shows only "check failed".
+		if res.Status == store.StatusError && (prev.Status != store.StatusError || prev.Err != res.Err) {
+			s.logger.Warn("registry check failed", "ref", ref, "err", res.Err)
+		}
 
 		if res.Status == store.StatusOK {
 			current := res.Current // SEMVER records the running tag; DIGEST does not
@@ -246,26 +279,37 @@ func (s *Scheduler) runCycle(ctx context.Context, force bool) {
 // stampRepublished carries or refreshes res's republish date. On a new registry
 // digest (or a date-less record from an older schema) it fetches the registry's
 // build timestamp, falling back to the current cycle time when the publisher
-// zeroed it. Failed checks carry the previous date forward, so a registry blip
-// never resets it; a failure record has no digest to compare against, so a
-// republish landing inside such a gap keeps the older date rather than
-// resetting on every blip.
-func (s *Scheduler) stampRepublished(ctx context.Context, ref string, prev store.CheckResult, res *store.CheckResult, now time.Time) {
+// zeroed it or the lookup failed. A transient failure (a 429, or the lookup's
+// deadline) or skipLookup instead leaves the date unset so the next check
+// fetches it again; a 429 is returned so the caller pauses further lookups.
+// Failed checks carry the previous date forward, so a registry blip never
+// resets it; a failure record has no digest to compare against, so a republish
+// landing inside such a gap keeps the older date rather than resetting on every
+// blip.
+func (s *Scheduler) stampRepublished(ctx context.Context, ref string, prev store.CheckResult, res *store.CheckResult, now time.Time, skipLookup bool) error {
 	res.RepublishedAt = prev.RepublishedAt
 	res.RepublishedEstimated = prev.RepublishedEstimated
 	if res.Status != store.StatusOK || res.RegistryDigest == "" {
-		return
+		return nil
 	}
 	if !prev.RepublishedAt.IsZero() && (prev.RegistryDigest == "" || res.RegistryDigest == prev.RegistryDigest) {
-		return
+		return nil
 	}
-	if created, err := s.reg.Created(ctx, ref); err == nil && created.Unix() > 0 {
-		res.RepublishedAt = created
-		res.RepublishedEstimated = false
-		return
+	if skipLookup {
+		res.RepublishedAt, res.RepublishedEstimated = time.Time{}, false
+		return nil
 	}
-	res.RepublishedAt = now
-	res.RepublishedEstimated = true
+	created, err := s.reg.Created(ctx, ref)
+	switch {
+	case errors.Is(err, registry.ErrRateLimited) || (err != nil && ctx.Err() != nil):
+		res.RepublishedAt, res.RepublishedEstimated = time.Time{}, false
+		return err
+	case err == nil && created.Unix() > 0:
+		res.RepublishedAt, res.RepublishedEstimated = created, false
+	default:
+		res.RepublishedAt, res.RepublishedEstimated = now, true
+	}
+	return nil
 }
 
 // refAgg collects, per image reference, the facts the notifier joins across all
@@ -298,7 +342,8 @@ func (a *refAgg) staleHosts(registryDigest string) []string {
 
 // dedup collapses running, watched containers to unique image refs, accumulating
 // the hosts, each host's running digest, and the dw.tags filter per ref; a
-// checkable classification beats LOCAL when a ref appears as both.
+// checkable classification beats LOCAL when a ref appears as both. Refs are
+// canonical (inventory.Ref), so two spellings of one image notify once.
 func (s *Scheduler) dedup(invs []inventory.Inventory) map[string]*refAgg {
 	out := make(map[string]*refAgg)
 	for _, inv := range invs {
@@ -306,16 +351,17 @@ func (s *Scheduler) dedup(invs []inventory.Inventory) map[string]*refAgg {
 			if c.State != "running" || c.Labels["dw.watch"] == "false" {
 				continue
 			}
-			agg, ok := out[c.Image]
+			ref := inventory.Ref(c.Image)
+			agg, ok := out[ref]
 			if !ok {
 				agg = &refAgg{kind: Classify(c), byHost: make(map[string]string)}
-				out[c.Image] = agg
+				out[ref] = agg
 			} else if agg.kind == KindLocal {
 				agg.kind = Classify(c)
 			}
 			if inv.Host != "" {
 				agg.hosts = appendUnique(agg.hosts, inv.Host)
-				if dig := runningDigest(c, c.Image); dig != "" {
+				if dig := runningDigest(c, ref); dig != "" {
 					agg.byHost[inv.Host] = dig
 				}
 			}
@@ -326,7 +372,7 @@ func (s *Scheduler) dedup(invs []inventory.Inventory) map[string]*refAgg {
 					if f < agg.tagFilter {
 						agg.tagFilter = f
 					}
-					s.logger.Warn("conflicting dw.tags labels for image", "ref", c.Image, "using", agg.tagFilter)
+					s.logger.Warn("conflicting dw.tags labels for image", "ref", ref, "using", agg.tagFilter)
 				}
 			}
 		}
@@ -358,8 +404,8 @@ func runningDigest(c inventory.Container, ref string) string {
 }
 
 // bareRepo reduces a reference or repo_digest entry to its repository path,
-// dropping any registry host, tag, and digest so two spellings of the same image
-// compare equal.
+// dropping any registry host, tag, digest, and leading library/ (Docker Hub's
+// implied namespace) so two spellings of the same image compare equal.
 func bareRepo(s string) string {
 	if i := strings.IndexByte(s, '@'); i >= 0 {
 		s = s[:i]
@@ -376,7 +422,7 @@ func bareRepo(s string) string {
 			s = s[i+1:]
 		}
 	}
-	return s
+	return strings.TrimPrefix(s, "library/")
 }
 
 func appendUnique(ss []string, v string) []string {

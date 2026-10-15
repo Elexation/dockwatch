@@ -21,6 +21,7 @@ const (
 	StateRepublished                     // the pinned tag's registry index digest moved
 	StateChecking                        // live, JS-only; the builder never emits it
 	StateRate                            // registry rate-limited the check
+	StateError                           // the check failed (a registry error, an invalid dw.tags regex)
 	StateCurrent                         // up to date
 	StateLocal                           // locally built image, not checkable
 	StateAuth                            // registry demands auth, not checkable
@@ -38,6 +39,8 @@ func (s DisplayState) String() string {
 		return "checking"
 	case StateRate:
 		return "rate"
+	case StateError:
+		return "error"
 	case StateCurrent:
 		return "current"
 	case StateLocal:
@@ -67,9 +70,10 @@ type RowVM struct {
 	State                string // DisplayState.String(), for the template switch
 	From                 string // SEMVER: running version
 	To                   string // SEMVER: newest available version
-	Bump                 string // "major", "minor", or "patch"
+	Bump                 string // "major", "minor", "patch", or "" when not computable
 	RepublishedAt        time.Time
 	RepublishedEstimated bool   // date is the hub's first-seen time, not the registry's
+	Err                  string // StateError: why the check failed
 	Health               string // "healthy", "unhealthy", "starting", or "" for none
 	Checked              time.Time
 	Stale                bool      // host unreachable: the row is a last-known snapshot
@@ -97,6 +101,17 @@ type DashboardVM struct {
 	Summary  string // "N of M containers · K updates"
 	Empty    bool
 	EmptyMsg string
+	// DockerDown lists hosts whose Docker daemon did not answer, in the last
+	// inventory that got through. They have no rows, hence no group or stale
+	// marker, so without a notice they would just vanish.
+	DockerDown []HostNoticeVM
+}
+
+// HostNoticeVM is a dashboard notice for a host whose containers cannot be listed.
+type HostNoticeVM struct {
+	Host     string
+	Stale    bool      // the host is also unreachable now; Docker was down when last seen
+	LastSeen time.Time // that host's last successful poll, when Stale
 }
 
 // AgentCardVM is one agent's card on the agents page.
@@ -172,11 +187,20 @@ func deriveState(c inventory.Container, ch store.CheckResult, found bool) Displa
 		return StateAuth
 	case store.StatusRateLimited:
 		return StateRate
+	case store.StatusError:
+		return StateError
 	}
 	if ch.Kind == "SEMVER" && ch.Latest != "" {
 		return StateUpdate
 	}
-	if ch.RegistryDigest != "" && ch.RegistryDigest != runningIndexDigest(c, ch.Ref) {
+	// A container with no repo digest is a local build or loaded image sharing
+	// the ref with a pulled one. The notifier's join treats it as unknown, so a
+	// DIGEST verdict here would claim a currency nothing proves.
+	run := runningIndexDigest(c, ch.Ref)
+	if run == "" && ch.Kind == "DIGEST" {
+		return StateLocal
+	}
+	if ch.RegistryDigest != "" && run != "" && run != ch.RegistryDigest {
 		return StateRepublished
 	}
 	return StateCurrent

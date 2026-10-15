@@ -27,6 +27,12 @@ func (s *Store) PutNotified(n NotifiedState) error {
 	})
 }
 
+// PruneNotified deletes the states whose reference keep rejects and returns how
+// many it removed; each dropped ref may notify once more.
+func (s *Store) PruneNotified(keep func(ref string) bool) (int, error) {
+	return s.pruneKeys(bucketNotified, keep)
+}
+
 // GetNotified returns the stored state for ref, with found=false if none exists.
 func (s *Store) GetNotified(ref string) (NotifiedState, bool, error) {
 	var n NotifiedState

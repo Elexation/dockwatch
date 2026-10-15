@@ -67,7 +67,7 @@
 	var statusGroups = {
 		update: { update: true, republished: true },
 		current: { current: true },
-		notcheckable: { local: true, auth: true, rate: true }
+		notcheckable: { local: true, auth: true, rate: true, error: true, pending: true }
 	};
 	var hostSel = document.querySelector("[data-dw-host]");
 	var statusSel = document.querySelector("[data-dw-status]");
@@ -75,7 +75,8 @@
 	// the wrapper also carries the mobile-only cycle stamp as a sibling.
 	var countEl = document.querySelector(".dw-countnum");
 	var noResults = document.querySelector("[data-dw-noresults]");
-	var checking = false;
+	// Seeded from the server's flag so the load-time count keeps its "checking…" tail.
+	var checking = root.hasAttribute("data-checking");
 
 	function rowVisible(row, host, status) {
 		if (host !== "all" && row.getAttribute("data-host") !== host) return false;
@@ -130,6 +131,7 @@
 		var vers = document.querySelectorAll(".dw-row:not(.stale) .dw-ver");
 		for (var i = 0; i < vers.length; i++) {
 			vers[i].className = "dw-ver dw-checking";
+			vers[i].removeAttribute("title"); // a previous check's error, stale once rechecking
 			vers[i].setAttribute("aria-live", "polite");
 			vers[i].textContent = "checking…";
 		}

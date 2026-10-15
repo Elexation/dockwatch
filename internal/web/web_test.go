@@ -53,6 +53,9 @@ func TestDeriveState(t *testing.T) {
 		{"semver-update-beats-republish", running("x", "x:1.2.3", "x@sha256:old", ""), store.CheckResult{Ref: "x:1.2.3", Kind: "SEMVER", Latest: "1.3.0", RegistryDigest: "sha256:new", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateUpdate},
 		{"semver-current-same-digest", running("x", "x:1.2.3", "x@sha256:idx", ""), store.CheckResult{Ref: "x:1.2.3", Kind: "SEMVER", RegistryDigest: "sha256:idx", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateCurrent},
 		{"local-beats-checked", local("x", "x:dev", ""), store.CheckResult{Kind: "LOCAL", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateLocal},
+		{"error", running("x", "x:1.2.3", "x@sha256:a", ""), store.CheckResult{Kind: "SEMVER", Status: store.StatusError, Err: "invalid dw.tags regex", CheckedAt: fixedNow}, true, StateError},
+		// A host with no repo digest is unknown to the notifier's join too: neither republished nor current.
+		{"no-running-digest-is-local", local("x", "x:stable", ""), store.CheckResult{Ref: "x:stable", Kind: "DIGEST", RegistryDigest: "sha256:new", Status: store.StatusOK, CheckedAt: fixedNow}, true, StateLocal},
 	}
 	for _, tc := range cases {
 		if got := deriveState(tc.c, tc.ch, tc.found); got != tc.want {
@@ -173,7 +176,7 @@ func TestBareNameAuthRendersLocal(t *testing.T) {
 		},
 	}}
 	checks := []store.CheckResult{
-		status("dockwatch", "DIGEST", store.StatusAuthRequired),
+		status("dockwatch:latest", "DIGEST", store.StatusAuthRequired), // the scheduler's canonical key
 		status("plexinc/pms:1.40", "SEMVER", store.StatusAuthRequired),
 	}
 	vm := BuildDashboard(invs, checks, DashboardInput{})
@@ -215,6 +218,62 @@ func TestBuildAgents(t *testing.T) {
 	if len(byName["pi4"].Flags) != 0 {
 		t.Errorf("pi4 flags: %v", byName["pi4"].Flags)
 	}
+}
+
+func TestBuildAgentsDownOutranksStaleDockerStatus(t *testing.T) {
+	// The Docker status is from the last inventory that got through, before the host went down.
+	vm := BuildAgents([]store.AgentStatus{{Name: "nas", LastOK: false}},
+		AgentsInput{DockerStatus: map[string]string{"nas": inventory.DockerUnavailable}})
+	if got := vm.Cards[0].ReachClass; got != "down" {
+		t.Errorf("reach = %q, want down", got)
+	}
+}
+
+func TestBuildAgentsFlagsOlderAgent(t *testing.T) {
+	vm := BuildAgents([]store.AgentStatus{{Name: "old", LastOK: true, LastWireV: inventory.WireVersion - 1}}, AgentsInput{})
+	older := inventory.WireVersion - 1
+	flags := vm.Cards[0].Flags
+	if older > 0 && (len(flags) != 1 || !strings.Contains(flags[0], "agent is older")) {
+		t.Errorf("flags = %v, want the older-agent flag", flags)
+	}
+	if older == 0 && len(flags) != 0 {
+		t.Errorf("flags = %v, want none: wire version 0 means never polled", flags)
+	}
+}
+
+func TestBuildDashboardNamesDockerDownHost(t *testing.T) {
+	invs := []inventory.Inventory{
+		{V: 1, Host: "local", Docker: inventory.DockerUnavailable},
+		{V: 1, Host: "pi4", Docker: inventory.DockerUnavailable},
+	}
+	in := DashboardInput{LocalName: "local", StaleHosts: map[string]time.Time{"pi4": fixedNow}}
+	vm := BuildDashboard(invs, nil, in)
+	// pi4 has no rows, so no group or stale marker: without its notice it would vanish.
+	want := []HostNoticeVM{{Host: "local"}, {Host: "pi4", Stale: true, LastSeen: fixedNow}}
+	if len(vm.DockerDown) != len(want) || vm.DockerDown[0] != want[0] || vm.DockerDown[1] != want[1] {
+		t.Errorf("DockerDown = %+v, want %+v", vm.DockerDown, want)
+	}
+	if !vm.Empty || !strings.Contains(vm.EmptyMsg, "Docker is unavailable") {
+		t.Errorf("empty=%v msg=%q, want the Docker explanation", vm.Empty, vm.EmptyMsg)
+	}
+	var buf bytes.Buffer
+	if err := testRenderer().RenderDashboard(&buf, vm); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	assertContains(t, "dashboard", buf.String(), "Docker unavailable on local.", "pi4 is unreachable.")
+	assertNoBannedGlyph(t, "dashboard", buf.String())
+}
+
+func TestRenderCheckFailedCell(t *testing.T) {
+	invs := []inventory.Inventory{{V: 1, Host: "home", Docker: inventory.DockerOK, Containers: []inventory.Container{
+		running("app", "team/app:1.2.3", "team/app@sha256:a", ""),
+	}}}
+	checks := []store.CheckResult{{Ref: "team/app:1.2.3", Kind: "SEMVER", Status: store.StatusError, Err: "invalid dw.tags regex", CheckedAt: fixedNow}}
+	var buf bytes.Buffer
+	if err := testRenderer().RenderDashboard(&buf, BuildDashboard(invs, checks, DashboardInput{})); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	assertContains(t, "dashboard", buf.String(), `data-state="error"`, `title="invalid dw.tags regex">check failed`)
 }
 
 func TestBuildAgentsEmpty(t *testing.T) {

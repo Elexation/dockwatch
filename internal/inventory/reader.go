@@ -11,6 +11,7 @@ import (
 // *client.Client satisfies it; tests supply a fake.
 type dockerClient interface {
 	ContainerList(ctx context.Context, options client.ContainerListOptions) (client.ContainerListResult, error)
+	ContainerInspect(ctx context.Context, containerID string, options client.ContainerInspectOptions) (client.ContainerInspectResult, error)
 	ImageInspect(ctx context.Context, imageID string, opts ...client.ImageInspectOption) (client.ImageInspectResult, error)
 }
 
@@ -43,6 +44,9 @@ func NewReader(cli dockerClient, host string) *Reader {
 // and no containers, and the underlying error is returned for logging only
 // (callers should still use the Inventory). A failure to inspect a single
 // image degrades that container's registry fields but never aborts the read.
+// If ctx ends partway through, the result is reported as unavailable instead:
+// the remaining containers would carry no repo digests, which downstream reads
+// as local builds.
 func (r *Reader) Read(ctx context.Context) (Inventory, error) {
 	inv := Inventory{
 		V:          WireVersion,
@@ -61,7 +65,7 @@ func (r *Reader) Read(ctx context.Context) (Inventory, error) {
 	for _, s := range list.Items {
 		c := Container{
 			Name:        containerName(s.Names),
-			Image:       s.Image,
+			Image:       r.imageRef(ctx, s.ID, s.Image),
 			ImageID:     s.ImageID,
 			State:       string(s.State),
 			Labels:      dwLabels(s.Labels),
@@ -88,7 +92,26 @@ func (r *Reader) Read(ctx context.Context) (Inventory, error) {
 
 		inv.Containers = append(inv.Containers, c)
 	}
+	if err := ctx.Err(); err != nil {
+		inv.Docker, inv.Containers = DockerUnavailable, []Container{}
+		return inv, err
+	}
 	return inv, nil
+}
+
+// imageRef returns the image reference the container was started from. Once its
+// tag moves to a newer image (a pull without recreating the container), the
+// container list reports the bare image ID instead, which no registry knows;
+// the container's own config still holds the name it was run with.
+func (r *Reader) imageRef(ctx context.Context, containerID, listed string) string {
+	if !strings.HasPrefix(listed, "sha256:") {
+		return listed
+	}
+	insp, err := r.cli.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
+	if err != nil || insp.Container.Config == nil || insp.Container.Config.Image == "" {
+		return listed
+	}
+	return insp.Container.Config.Image
 }
 
 func containerName(names []string) string {

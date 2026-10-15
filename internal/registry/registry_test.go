@@ -1,12 +1,61 @@
 package registry
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 )
+
+const testDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+// fakeRegistry answers the manifest HEAD per head and counts manifest GETs.
+func fakeRegistry(t *testing.T, head func(w http.ResponseWriter)) (host string, gets *int) {
+	t.Helper()
+	gets = new(int)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v2/team/app/manifests/1.0" && r.Method == http.MethodHead:
+			head(w)
+		default:
+			*gets++
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return strings.TrimPrefix(srv.URL, "http://"), gets
+}
+
+func TestDigestUsesHead(t *testing.T) {
+	host, gets := fakeRegistry(t, func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/vnd.oci.image.index.v1+json")
+		w.Header().Set("Content-Length", "123")
+		w.Header().Set("Docker-Content-Digest", testDigest)
+	})
+	got, err := New().Digest(context.Background(), host+"/team/app:1.0")
+	if err != nil || got != testDigest {
+		t.Fatalf("Digest = %q, %v; want %s", got, err, testDigest)
+	}
+	if *gets != 0 {
+		t.Errorf("%d manifest GETs, want 0: a GET counts against the pull limit", *gets)
+	}
+}
+
+func TestDigestRateLimitSkipsGet(t *testing.T) {
+	host, gets := fakeRegistry(t, func(w http.ResponseWriter) { w.WriteHeader(http.StatusTooManyRequests) })
+	if _, err := New().Digest(context.Background(), host+"/team/app:1.0"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("Digest err = %v, want ErrRateLimited", err)
+	}
+	if *gets != 0 {
+		t.Errorf("%d manifest GETs after a 429, want 0", *gets)
+	}
+}
 
 func TestClassifyStatusCodes(t *testing.T) {
 	cases := []struct {

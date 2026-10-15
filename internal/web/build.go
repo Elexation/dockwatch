@@ -42,15 +42,19 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 	}
 
 	var rows []RowVM
+	var dockerDown []HostNoticeVM
 	seen := map[string]bool{}
 	var order []string
 	for _, inv := range invs {
 		lastSeen, stale := in.StaleHosts[inv.Host]
+		if inv.Docker == inventory.DockerUnavailable {
+			dockerDown = append(dockerDown, HostNoticeVM{Host: inv.Host, Stale: stale, LastSeen: lastSeen})
+		}
 		for _, c := range inv.Containers {
 			if c.State != "running" || c.Labels["dw.watch"] == "false" {
 				continue
 			}
-			ch, found := byRef[c.Image]
+			ch, found := byRef[inventory.Ref(c.Image)] // the scheduler's key, not the raw spelling
 			st := deriveState(c, ch, found)
 			row := RowVM{
 				Host:     inv.Host,
@@ -69,6 +73,8 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 			case StateRepublished:
 				row.RepublishedAt = ch.RepublishedAt
 				row.RepublishedEstimated = ch.RepublishedEstimated
+			case StateError:
+				row.Err = ch.Err
 			}
 			rows = append(rows, row)
 			if inv.Host != "" && !seen[inv.Host] {
@@ -121,13 +127,17 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 			NotificationsOff: in.NotificationsOff,
 			Checking:         in.Checking,
 		},
-		Hosts:    hosts,
-		Groups:   groups,
-		FlatRows: rows,
+		Hosts:      hosts,
+		Groups:     groups,
+		FlatRows:   rows,
+		DockerDown: dockerDown,
 	}
 	if len(rows) == 0 {
 		vm.Empty = true
 		vm.EmptyMsg = "Nothing is running yet on the configured hosts."
+		if len(dockerDown) > 0 {
+			vm.EmptyMsg = "No containers could be listed while Docker is unavailable."
+		}
 		return vm
 	}
 	tail := fmt.Sprintf("%d %s", updates, plural(updates, "update", "updates"))
@@ -139,7 +149,9 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 }
 
 // BuildAgents maps stored agent statuses into the agents page model; reachability
-// resolves Docker-unavailable over unreachable over reachable.
+// resolves unreachable over Docker-unavailable over reachable. The Docker status
+// comes from the last inventory that got through, so it says nothing about an
+// agent that is down now.
 func BuildAgents(agents []store.AgentStatus, in AgentsInput) AgentsVM {
 	vm := AgentsVM{
 		Chrome: ChromeVM{
@@ -158,16 +170,20 @@ func BuildAgents(agents []store.AgentStatus, in AgentsInput) AgentsVM {
 			CertNotAfter: a.CertNotAfter,
 		}
 		switch {
-		case in.DockerStatus[a.Name] == inventory.DockerUnavailable:
-			card.ReachClass, card.ReachLabel = "nodocker", "Docker unavailable"
 		case !a.LastOK:
 			card.ReachClass, card.ReachLabel = "down", "unreachable"
+		case in.DockerStatus[a.Name] == inventory.DockerUnavailable:
+			card.ReachClass, card.ReachLabel = "nodocker", "Docker unavailable"
 		default:
 			card.ReachClass, card.ReachLabel = "ok", "reachable"
 		}
-		if a.LastWireV > inventory.WireVersion {
+		switch {
+		case a.LastWireV > inventory.WireVersion:
 			card.Flags = append(card.Flags,
 				fmt.Sprintf("Update hub: agent is newer (agent v%d, hub v%d).", a.LastWireV, inventory.WireVersion))
+		case a.LastWireV != 0 && a.LastWireV < inventory.WireVersion:
+			card.Flags = append(card.Flags,
+				fmt.Sprintf("Update agent: agent is older (agent v%d, hub v%d).", a.LastWireV, inventory.WireVersion))
 		}
 		if !a.LastRenewalReminder.IsZero() {
 			card.Flags = append(card.Flags,
@@ -237,7 +253,8 @@ func runningIndexDigest(c inventory.Container, ref string) string {
 	return first
 }
 
-// bareRepo reduces a reference to its bare repository path (no host, tag, digest). Duplicated from internal/hub.
+// bareRepo reduces a reference to its bare repository path (no host, tag, digest,
+// or leading library/, Docker Hub's implied namespace). Duplicated from internal/hub.
 func bareRepo(s string) string {
 	if i := strings.IndexByte(s, '@'); i >= 0 {
 		s = s[:i]
@@ -254,7 +271,7 @@ func bareRepo(s string) string {
 			s = s[i+1:]
 		}
 	}
-	return s
+	return strings.TrimPrefix(s, "library/")
 }
 
 func plural(n int, one, many string) string {

@@ -151,6 +151,8 @@ checked: refs shared with a live host would otherwise read "just now" here. */}}
 <span class="dw-ver dw-mut">auth required, not checkable</span>
 {{- else if eq .State "rate" -}}
 <span class="dw-ver dw-mut">check delayed (rate limited)</span>
+{{- else if eq .State "error" -}}
+<span class="dw-ver dw-mut"{{with .Err}} title="{{.}}"{{end}}>check failed</span>
 {{- else -}}
 <span class="dw-ver dw-mut">not checked yet</span>
 {{- end}}

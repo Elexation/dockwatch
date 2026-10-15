@@ -68,3 +68,27 @@ func Open(dir string) (*Store, error) {
 func (s *Store) Close() error {
 	return s.db.Close()
 }
+
+// pruneKeys deletes every key in bucket that keep rejects and returns how many
+// it removed. Keys are collected first, since bbolt cursors cannot delete safely.
+func (s *Store) pruneKeys(bucket []byte, keep func(key string) bool) (int, error) {
+	var drop [][]byte
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if err := b.ForEach(func(k, _ []byte) error {
+			if !keep(string(k)) {
+				drop = append(drop, append([]byte(nil), k...))
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, k := range drop {
+			if err := b.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return len(drop), err
+}

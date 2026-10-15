@@ -19,7 +19,7 @@ const (
 
 // CheckResult is a per-reference (not per-container) registry check; hosts sharing an image share one entry and one registry call.
 type CheckResult struct {
-	Ref            string `json:"ref"`                       // full reference, e.g. gitea/gitea:1.24.3
+	Ref            string `json:"ref"`                       // canonical reference (inventory.Ref), e.g. gitea/gitea:1.24.3
 	Kind           string `json:"kind"`                      // LOCAL | SEMVER | DIGEST
 	Current        string `json:"current,omitempty"`         // SEMVER: the running tag's version
 	Latest         string `json:"latest,omitempty"`          // SEMVER: newest tag matching TagFilter, when newer
@@ -29,7 +29,8 @@ type CheckResult struct {
 
 	// RepublishedAt is when the current RegistryDigest was published (the image
 	// config's created time), or when the hub first observed it if the publisher
-	// zeroed the build date; RepublishedEstimated marks that fallback.
+	// zeroed the build date or it could not be fetched; RepublishedEstimated marks
+	// that fallback. Zero after a rate-limited fetch, which the next check retries.
 	RepublishedAt        time.Time `json:"republished_at,omitzero"`
 	RepublishedEstimated bool      `json:"republished_estimated,omitempty"`
 
@@ -62,6 +63,12 @@ func (s *Store) GetCheck(ref string) (CheckResult, bool, error) {
 		return json.Unmarshal(v, &r)
 	})
 	return r, found, err
+}
+
+// PruneChecks deletes the results whose reference keep rejects and returns how
+// many it removed. Results are cache, so a dropped one is simply rechecked.
+func (s *Store) PruneChecks(keep func(ref string) bool) (int, error) {
+	return s.pruneKeys(bucketChecks, keep)
 }
 
 // AllChecks returns every stored check result, in reference order.

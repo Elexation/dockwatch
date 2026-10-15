@@ -224,7 +224,7 @@ html, body { margin: 0; padding: 0; }
 @media (max-width: 760px) {
   /* The header does not fit one row at phone widths; wrap rather than clip the controls. */
   .dw-top { padding: 8px 14px; gap: 8px; height: auto; flex-wrap: wrap; }
-  .dw-mark { font-size: var(--fs-lg); gap: 7px; }
+  .dw-mark { font-size: var(--fs-lg); gap: 7px; min-height: 44px; }
   .dw-nav { gap: 2px; }
   .dw-nav a { display: flex; align-items: center; min-height: 44px; padding: 0 10px; }
   .dw-root { --ctl-h: 44px; }
