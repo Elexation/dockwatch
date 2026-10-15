@@ -15,6 +15,7 @@ type Admin struct {
 	Username  string    `json:"username"`
 	Hash      string    `json:"hash"`
 	CreatedAt time.Time `json:"created_at"`
+	Epoch     uint64    `json:"epoch"` // bumped on every password change; older sessions die with it
 }
 
 // PutAdmin stores (or replaces) the admin record.

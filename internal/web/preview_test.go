@@ -47,6 +47,7 @@ func TestWritePreview(t *testing.T) {
 		{"agents", func(b *bytes.Buffer) error { return r.RenderAgents(b, BuildAgents(agents, ain)) }},
 		{"setup", func(b *bytes.Buffer) error { return r.RenderSetup(b, setupClean()) }},
 		{"login", func(b *bytes.Buffer) error { return r.RenderLogin(b, loginClean()) }},
+		{"settings", func(b *bytes.Buffer) error { return r.RenderSettings(b, settingsClean()) }},
 	}
 	for _, p := range pages {
 		var buf bytes.Buffer

@@ -71,7 +71,9 @@
 	};
 	var hostSel = document.querySelector("[data-dw-host]");
 	var statusSel = document.querySelector("[data-dw-status]");
-	var countEl = document.querySelector(".dw-count");
+	// The inner node, not .dw-count itself: updateCount overwrites textContent, and
+	// the wrapper also carries the mobile-only cycle stamp as a sibling.
+	var countEl = document.querySelector(".dw-countnum");
 	var noResults = document.querySelector("[data-dw-noresults]");
 	var checking = false;
 
@@ -142,20 +144,57 @@
 	// session gate bounced us, so the body is a login page rather than JSON.
 	function usable(r) { return r.ok && !r.redirected; }
 
-	// pollStatus reloads once done(status) holds; a redirect means the session
-	// is gone (reload lands on login), a network error keeps polling.
+	// Give a stalled cycle plenty of room before declaring it lost: a cycle can
+	// legitimately outrun any fixed timeout, so only consecutive failures count.
+	var maxPollFailures = 15;
+
+	// Undo the busy state after giving up. setCheckingUI overwrote the row values,
+	// so they cannot be restored here; say the check failed rather than leave every
+	// row reading "checking…" with nothing still checking. Only rows it swapped are
+	// touched: a page loaded mid-cycle never ran it and still shows real values.
+	function checkFailedUI() {
+		checking = false;
+		root.removeAttribute("data-checking");
+		if (checkBtn) { checkBtn.disabled = false; }
+		var rows = document.querySelectorAll(".dw-row:not(.stale)");
+		for (var i = 0; i < rows.length; i++) {
+			var ver = rows[i].querySelector(".dw-ver.dw-checking");
+			if (!ver) continue;
+			ver.className = "dw-ver dw-mut";
+			ver.textContent = "check failed";
+			var times = rows[i].querySelectorAll(".dw-time");
+			for (var j = 0; j < times.length; j++) times[j].textContent = "-";
+		}
+		var hups = document.querySelectorAll(".hup");
+		for (var k = 0; k < hups.length; k++) hups[k].hidden = false;
+		updateCount();
+	}
+
+	// pollStatus reloads once done(status) holds; a redirect means the session is
+	// gone (reload lands on login). Single failures are ignored so a blip cannot
+	// abort a running cycle, but they are counted: without a ceiling an unreachable
+	// hub leaves this interval running forever behind a permanently disabled button.
 	function pollStatus(done) {
+		var fails = 0;
 		var timer = setInterval(function () {
 			fetch("/check").then(function (r) {
 				if (r.redirected) { location.reload(); return null; }
 				return usable(r) ? r.json() : null;
 			}).then(function (s) {
-				if (s && done(s)) {
+				if (!s) { giveUp(); return; }
+				fails = 0;
+				if (done(s)) {
 					clearInterval(timer);
 					location.reload();
 				}
-			}).catch(function () {});
+			}).catch(giveUp);
 		}, 1000);
+
+		function giveUp() {
+			if (++fails < maxPollFailures) { return; }
+			clearInterval(timer);
+			checkFailedUI();
+		}
 	}
 
 	if (checkBtn) {

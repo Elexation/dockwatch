@@ -51,7 +51,7 @@ func (s DisplayState) String() string {
 
 // ChromeVM is the shared app-page chrome (header plus notifications notice).
 type ChromeVM struct {
-	Active           string // "dashboard" or "agents"; drives aria-current
+	Active           string // nav key ("dashboard", "agents", "settings"); drives aria-current
 	Theme            string // "light" or "dark"; dark is the default
 	Layout           string // "grouped" or "flat"; dashboard only
 	LastCycle        time.Time
@@ -116,6 +116,14 @@ type AgentsVM struct {
 	Empty  bool
 }
 
+// SettingsVM is the settings page model; its only section is the password change.
+type SettingsVM struct {
+	Chrome ChromeVM
+	Banner string // generic top-of-section error, never field-specific
+	Done   bool   // success confirmation, rendered on a fresh form
+	Fields []FieldVM
+}
+
 // FieldVM is one labeled input on an auth form.
 type FieldVM struct {
 	ID           string
@@ -124,6 +132,7 @@ type FieldVM struct {
 	Name         string
 	Autocomplete string
 	Value        string
+	Hint         string // constraint shown before submit, e.g. a minimum length
 	Error        string
 }
 

@@ -1,0 +1,20 @@
+{{define "settings" -}}
+{{template "appopen" (dict "Chrome" .Chrome "Title" "Settings")}}
+	<div class="dw-pagehead">
+		<h1>Settings</h1>
+		<span class="sub">this hub's admin account</span>
+	</div>
+	<div class="dw-formpage">
+		<section class="dw-authbox" aria-labelledby="set-pw">
+			<h2 id="set-pw">Change password</h2>
+			<p class="dw-sectsub">Signing in elsewhere will need the new password.</p>
+			{{if .Done}}<div class="dw-formok" role="status">Password changed. Other sessions were signed out.</div>{{end}}
+			{{if .Banner}}<div class="dw-formerr" role="alert">{{.Banner}}</div>{{end}}
+			<form class="dw-fields" method="post" action="/settings/password" novalidate>
+				{{range .Fields}}{{template "field" .}}{{end}}
+				<button class="dw-btnprimary dw-submit" type="submit">Change password</button>
+			</form>
+		</section>
+	</div>
+{{template "appclose"}}
+{{- end}}

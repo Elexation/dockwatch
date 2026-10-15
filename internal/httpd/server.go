@@ -86,6 +86,8 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /agents", s.requireSession(s.agents))
 	mux.HandleFunc("POST /check", s.requireSession(s.checkNow))
 	mux.HandleFunc("GET /check", s.requireSession(s.checkStatus))
+	mux.HandleFunc("GET /settings", s.requireSession(s.settingsPage))
+	mux.HandleFunc("POST /settings/password", s.requireSession(s.passwordSubmit))
 	// Unauthenticated surface.
 	mux.HandleFunc("GET /login", s.loginForm)
 	mux.HandleFunc("POST /login", s.loginSubmit)

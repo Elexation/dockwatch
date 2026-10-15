@@ -245,6 +245,145 @@ func TestResetAdminInvalidatesSessions(t *testing.T) {
 	wantRedirect(t, do(s, "GET", "/", nil, cookie), "/setup")
 }
 
+func TestPasswordRequiresSession(t *testing.T) {
+	s, st := newTestServer(t, false)
+	seedAdmin(t, st, "admin", "hunter2pass")
+	wantRedirect(t, do(s, "GET", "/settings", nil), "/login")
+	form := url.Values{"current": {"hunter2pass"}, "password": {"replacement1"}, "confirm": {"replacement1"}}
+	wantRedirect(t, do(s, "POST", "/settings/password", form), "/login")
+
+	// The unauthenticated POST must not have changed anything.
+	admin, _, err := st.GetAdmin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match, _ := auth.Verify(admin.Hash, "hunter2pass"); !match {
+		t.Error("password changed without a session")
+	}
+}
+
+func TestPasswordChangeRotatesHashAndSessions(t *testing.T) {
+	s, st := newTestServer(t, false)
+	cookie := loginSession(t, s, st)
+	// A second sign-in stands in for a session on another device.
+	other := sessionCookieOf(do(s, "POST", "/login", url.Values{"username": {"admin"}, "password": {"hunter2pass"}}))
+	if other == nil {
+		t.Fatal("no second session")
+	}
+
+	form := url.Values{"current": {"hunter2pass"}, "password": {"replacement1"}, "confirm": {"replacement1"}}
+	rec := do(s, "POST", "/settings/password", form, cookie)
+	wantRedirect(t, rec, "/settings?changed=1")
+
+	admin, _, err := st.GetAdmin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match, _ := auth.Verify(admin.Hash, "replacement1"); !match {
+		t.Error("new password does not verify")
+	}
+	if match, _ := auth.Verify(admin.Hash, "hunter2pass"); match {
+		t.Error("old password still verifies")
+	}
+
+	// The other device is evicted; this one is carried over to a fresh cookie.
+	if _, found, _ := st.GetSession(other.Value); found {
+		t.Error("other session survived the change")
+	}
+	reissued := sessionCookieOf(rec)
+	if reissued == nil || reissued.Value == "" {
+		t.Fatal("no reissued session cookie")
+	}
+	if reissued.Value == cookie.Value {
+		t.Error("session id was reused rather than reissued")
+	}
+	page := do(s, "GET", "/settings?changed=1", nil, reissued)
+	if page.Code != http.StatusOK {
+		t.Fatalf("reissued session rejected: code=%d", page.Code)
+	}
+	if !strings.Contains(page.Body.String(), "Password changed") {
+		t.Error("no confirmation after the redirect")
+	}
+}
+
+func TestPasswordChangeEvictsRacingSession(t *testing.T) {
+	s, st := newTestServer(t, false)
+	cookie := loginSession(t, s, st)
+	stale, _, err := st.GetAdmin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	form := url.Values{"current": {"hunter2pass"}, "password": {"replacement1"}, "confirm": {"replacement1"}}
+	wantRedirect(t, do(s, "POST", "/settings/password", form, cookie), "/settings?changed=1")
+
+	// A login that verified the old hash before the change, then wrote its
+	// session after the wipe.
+	racer := store.Session{ID: "racer", Username: "admin", Expiry: time.Now().Add(time.Hour), Epoch: stale.Epoch}
+	if err := st.PutSession(racer); err != nil {
+		t.Fatal(err)
+	}
+	wantRedirect(t, do(s, "GET", "/", nil, &http.Cookie{Name: sessionCookie, Value: racer.ID}), "/login")
+	if _, found, _ := st.GetSession(racer.ID); found {
+		t.Error("stale-epoch session was not evicted")
+	}
+}
+
+func TestPasswordChangeRejects(t *testing.T) {
+	// want is matched against the served HTML, so apostrophes arrive escaped.
+	for _, tc := range []struct {
+		name string
+		form url.Values
+		code int
+		want string
+	}{
+		{
+			"wrong current",
+			url.Values{"current": {"wrongpass1"}, "password": {"replacement1"}, "confirm": {"replacement1"}},
+			http.StatusUnauthorized, "Current password is incorrect",
+		},
+		{
+			"too short",
+			url.Values{"current": {"hunter2pass"}, "password": {"short1"}, "confirm": {"short1"}},
+			http.StatusBadRequest, passwordTooShort,
+		},
+		{
+			"mismatched confirm",
+			url.Values{"current": {"hunter2pass"}, "password": {"replacement1"}, "confirm": {"replacement2"}},
+			http.StatusBadRequest, "Passwords don&#39;t match.",
+		},
+		{
+			"unchanged",
+			url.Values{"current": {"hunter2pass"}, "password": {"hunter2pass"}, "confirm": {"hunter2pass"}},
+			http.StatusBadRequest, "must differ",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, st := newTestServer(t, false)
+			cookie := loginSession(t, s, st)
+
+			rec := do(s, "POST", "/settings/password", tc.form, cookie)
+			if rec.Code != tc.code {
+				t.Fatalf("code=%d, want %d", rec.Code, tc.code)
+			}
+			if !strings.Contains(rec.Body.String(), tc.want) {
+				t.Errorf("page missing %q", tc.want)
+			}
+			// Every rejection must leave the stored password untouched.
+			admin, _, err := st.GetAdmin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if match, _ := auth.Verify(admin.Hash, "hunter2pass"); !match {
+				t.Error("password changed despite rejection")
+			}
+			if _, found, _ := st.GetSession(cookie.Value); !found {
+				t.Error("session dropped on a rejected change")
+			}
+		})
+	}
+}
+
 func TestCookieFlags(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

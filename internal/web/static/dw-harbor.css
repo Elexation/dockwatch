@@ -7,7 +7,8 @@ html, body { margin: 0; padding: 0; }
   --surface-2: oklch(0.26 0.017 245);
   --text: oklch(0.93 0.006 240);
   --text-2: oklch(0.7 0.012 240);
-  --text-3: oklch(0.6 0.014 240);
+  /* 0.63 is the floor that clears 4.5:1 on --surface; 0.6 passed only on --bg. */
+  --text-3: oklch(0.63 0.014 240);
   --line: oklch(0.31 0.018 245);
   --focus: oklch(0.75 0.12 250);
   --ok: oklch(0.74 0.13 155);
@@ -85,6 +86,9 @@ html, body { margin: 0; padding: 0; }
     4.2px -4.2px 0 -2.2px currentColor, 4.2px 4.2px 0 -2.2px currentColor, -4.2px 4.2px 0 -2.2px currentColor, -4.2px -4.2px 0 -2.2px currentColor;
 }
 .dw-root[data-theme="light"] .dw-themeglyph { width: 14px; height: 14px; margin: 0; background: transparent; box-shadow: inset -4px -3px 0 0 currentColor; }
+/* Icon link styled as a ghost button; aria-current tints it like the nav's. */
+.dw-cog { display: inline-flex; align-items: center; justify-content: center; padding: 5px 9px; text-decoration: none; }
+.dw-cog[aria-current="page"] { color: var(--text); background: var(--surface-2); border-color: var(--line); }
 .dw-logout { display: inline-flex; margin: 0; }
 .dw-signout { font-size: var(--fs-sm); padding: 5px 10px; }
 
@@ -113,6 +117,8 @@ html, body { margin: 0; padding: 0; }
 .dw-select { font: inherit; font-size: var(--fs-md); color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 6px 28px 6px 10px; min-height: var(--ctl-h); appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%); background-position: calc(100% - 14px) 55%, calc(100% - 10px) 55%; background-size: 4px 4px; background-repeat: no-repeat; cursor: pointer; }
 .dw-select:hover { border-color: var(--text-3); }
 .dw-count { margin-left: auto; color: var(--text-3); font-size: var(--fs-base); white-space: nowrap; }
+/* Cycle freshness rides the count line only where .dw-cycle is hidden. */
+.dw-cyclemob { display: none; }
 .dw-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
 .dw-seg button { font: inherit; font-size: var(--fs-base); color: var(--text-2); background: var(--surface); border: none; padding: 6px 12px; min-height: var(--ctl-h); cursor: pointer; }
 .dw-seg button:hover { color: var(--text); }
@@ -181,10 +187,17 @@ html, body { margin: 0; padding: 0; }
 .dw-input { font: inherit; font-size: var(--fs-lg); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 9px 12px; min-height: 40px; width: 100%; }
 .dw-input:focus { border-color: var(--focus); }
 .dw-input[aria-invalid="true"] { border-color: var(--bad); }
+.dw-fhint { color: var(--text-3); font-size: var(--fs-sm); }
 .dw-ferr { color: var(--bad); font-size: var(--fs-sm); font-weight: 500; }
 .dw-formerr { display: flex; gap: 8px; align-items: center; color: var(--bad); background: var(--bad-bg); border: 1px solid var(--bad); border-radius: 7px; padding: 8px 12px; font-size: var(--fs-base); }
 .dw-submit { padding: 10px 16px; min-height: 44px; margin-top: 4px; }
 .dw-authfoot { text-align: center; color: var(--text-3); font-size: var(--fs-xs); margin-top: 16px; }
+/* Same form card, but inside the app chrome rather than a centred logged-out page. */
+.dw-formpage { max-width: 420px; margin: 4px 28px 28px; display: grid; gap: 14px; }
+.dw-formpage h2 { font-size: var(--fs-xl); font-weight: 650; margin: 0; }
+.dw-sectsub { color: var(--text-3); font-size: var(--fs-base); margin: -6px 0 2px; }
+.dw-fields { display: grid; gap: 14px; }
+.dw-formok { display: flex; gap: 8px; align-items: center; color: var(--ok); background: var(--surface); border: 1px solid var(--ok); border-radius: 7px; padding: 8px 12px; font-size: var(--fs-base); }
 
 /* agents */
 .dw-agents { display: grid; gap: 14px; margin: 4px 28px 28px; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
@@ -213,18 +226,32 @@ html, body { margin: 0; padding: 0; }
   .dw-top { padding: 8px 14px; gap: 8px; height: auto; flex-wrap: wrap; }
   .dw-mark { font-size: var(--fs-lg); gap: 7px; }
   .dw-nav { gap: 2px; }
-  .dw-nav a { padding: 9px 9px; }
+  .dw-nav a { display: flex; align-items: center; min-height: 44px; padding: 0 10px; }
   .dw-root { --ctl-h: 44px; }
-  .dw-check { padding: 8px 12px; min-height: 44px; }
+  /* margin-left:auto is a one-row rule; once the header wraps it strands the
+     cluster mid-row, aligned to nothing. Fill the row and let Check now take
+     the slack so both edges sit on the same 14px gutter as every band below. */
+  .dw-top-right { margin-left: 0; width: 100%; gap: 10px; }
+  .dw-check { padding: 8px 12px; min-height: 44px; flex: 1; justify-content: center; }
+  .dw-themectl, .dw-cog { min-width: 44px; }
   .dw-input { min-height: 44px; }
   .dw-cycle { display: none; }
   .dw-notice { margin: 12px 14px 0; }
   .dw-toolbar { padding: 14px 14px 12px; }
-  .dw-count { width: 100%; margin-left: 0; }
+  /* Host and Status share row one evenly. Basis stays auto and min-width is left
+     at its flex default so the selects grow into free space but never shrink
+     below their own option text; View keeps its width and wraps below. */
+  .dw-toolbar .dw-field:nth-child(-n+2) { flex: 1 1 auto; }
+  .dw-toolbar .dw-field:nth-child(-n+2) .dw-select { flex: 1 1 auto; }
+  .dw-seg button { min-width: 44px; }
+  .dw-count { width: 100%; margin-left: 0; white-space: normal; }
+  .dw-cyclemob { display: inline; }
   .dw-group { margin: 0 14px 14px; }
   .dw-empty { margin: 48px 14px; }
-  .dw-pagehead { padding: 16px 14px 10px; }
+  /* Baseline-aligned heading and subtitle both wrap at phone widths and interleave. */
+  .dw-pagehead { padding: 16px 14px 10px; flex-direction: column; align-items: flex-start; gap: 2px; }
   .dw-agents { margin: 4px 14px 20px; grid-template-columns: 1fr; }
+  .dw-formpage { margin: 4px 14px 20px; }
   .dw-row, .dw-row.flat { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 11px var(--row-pad-x); }
   .dw-row.flat .dw-host { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; }
   .dw-row .dw-ver { grid-column: 1 / -1; }

@@ -64,3 +64,8 @@ func (r *Renderer) RenderDashboard(w io.Writer, vm DashboardVM) error {
 func (r *Renderer) RenderAgents(w io.Writer, vm AgentsVM) error {
 	return r.tpl.ExecuteTemplate(w, "agents", vm)
 }
+
+// RenderSettings writes the settings page.
+func (r *Renderer) RenderSettings(w io.Writer, vm SettingsVM) error {
+	return r.tpl.ExecuteTemplate(w, "settings", vm)
+}

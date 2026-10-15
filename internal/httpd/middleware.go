@@ -31,7 +31,8 @@ func (s *Server) entryPath() string {
 	return "/setup"
 }
 
-// validSession returns the live session for the request's cookie, evicting an expired one.
+// validSession returns the live session for the request's cookie, evicting one
+// that has expired or was minted under an older password.
 func (s *Server) validSession(r *http.Request) (store.Session, bool) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil || c.Value == "" {
@@ -41,7 +42,13 @@ func (s *Server) validSession(r *http.Request) (store.Session, bool) {
 	if err != nil || !found {
 		return store.Session{}, false
 	}
-	if !s.now().Before(sess.Expiry) {
+	admin, found, err := s.cfg.Store.GetAdmin()
+	if err != nil || !found {
+		return store.Session{}, false
+	}
+	// The epoch check, not ClearSessions, is what evicts on a password change: a
+	// login or slide racing the change can write a session back after the wipe.
+	if !s.now().Before(sess.Expiry) || sess.Epoch != admin.Epoch {
 		_ = s.cfg.Store.DeleteSession(sess.ID)
 		return store.Session{}, false
 	}
@@ -61,13 +68,14 @@ func (s *Server) slide(w http.ResponseWriter, sess store.Session) {
 	}
 }
 
-// startSession creates and persists a new session for username and sets its cookie.
-func (s *Server) startSession(w http.ResponseWriter, username string) error {
+// startSession creates and persists a new session for admin and sets its cookie.
+// admin must be the record the caller verified against, so the epoch matches it.
+func (s *Server) startSession(w http.ResponseWriter, admin store.Admin) error {
 	id, err := auth.NewSessionID()
 	if err != nil {
 		return err
 	}
-	sess := store.Session{ID: id, Username: username, Expiry: s.now().Add(s.ttl)}
+	sess := store.Session{ID: id, Username: admin.Username, Expiry: s.now().Add(s.ttl), Epoch: admin.Epoch}
 	if err := s.cfg.Store.PutSession(sess); err != nil {
 		return err
 	}

@@ -223,10 +223,25 @@ func loginBanner() LoginVM {
 	return LoginVM{Theme: "dark", Banner: "Incorrect username or password", Fields: loginFields()}
 }
 
+func settingsClean() SettingsVM {
+	return SettingsVM{
+		Chrome: ChromeVM{Active: "settings", Theme: "dark", LastCycle: ago(5 * time.Minute), NotificationsOff: true},
+		Fields: passwordFields(),
+	}
+}
+
+func passwordFields() []FieldVM {
+	return []FieldVM{
+		{ID: "pw-current", Label: "Current password", Type: "password", Name: "current", Autocomplete: "current-password"},
+		{ID: "pw-new", Label: "New password", Type: "password", Name: "password", Autocomplete: "new-password", Hint: "At least 8 characters."},
+		{ID: "pw-confirm", Label: "Confirm new password", Type: "password", Name: "confirm", Autocomplete: "new-password"},
+	}
+}
+
 func setupFields(userErr, pwErr, confirmErr string) []FieldVM {
 	return []FieldVM{
 		{ID: "setup-user", Label: "Username", Type: "text", Name: "username", Autocomplete: "username", Error: userErr},
-		{ID: "setup-pw", Label: "Password", Type: "password", Name: "password", Autocomplete: "new-password", Error: pwErr},
+		{ID: "setup-pw", Label: "Password", Type: "password", Name: "password", Autocomplete: "new-password", Hint: "At least 8 characters.", Error: pwErr},
 		{ID: "setup-pw2", Label: "Confirm password", Type: "password", Name: "confirm", Autocomplete: "new-password", Error: confirmErr},
 	}
 }

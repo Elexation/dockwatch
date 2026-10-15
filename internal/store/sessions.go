@@ -12,6 +12,7 @@ type Session struct {
 	ID       string    `json:"id"`
 	Username string    `json:"username"`
 	Expiry   time.Time `json:"expiry"`
+	Epoch    uint64    `json:"epoch"` // admin Epoch it was minted under
 }
 
 // PutSession stores (or replaces) a session.

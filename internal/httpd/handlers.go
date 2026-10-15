@@ -3,6 +3,7 @@ package httpd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -17,6 +18,12 @@ import (
 const (
 	dockerReadTimeout = 5 * time.Second
 	minPasswordLen    = 8
+)
+
+// Both strings derive from minPasswordLen so the hint cannot drift from the rule.
+var (
+	passwordHint     = fmt.Sprintf("At least %d characters.", minPasswordLen)
+	passwordTooShort = fmt.Sprintf("Password must be at least %d characters.", minPasswordLen)
 )
 
 // --- first-run setup ---
@@ -50,11 +57,12 @@ func (s *Server) setupSubmit(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "hash password", err)
 		return
 	}
-	if err := s.cfg.Store.PutAdmin(store.Admin{Username: username, Hash: hash, CreatedAt: s.now()}); err != nil {
+	admin := store.Admin{Username: username, Hash: hash, CreatedAt: s.now()}
+	if err := s.cfg.Store.PutAdmin(admin); err != nil {
 		s.fail(w, "store admin", err)
 		return
 	}
-	if err := s.startSession(w, username); err != nil {
+	if err := s.startSession(w, admin); err != nil {
 		s.fail(w, "start session", err)
 		return
 	}
@@ -69,7 +77,7 @@ func validateSetup(username, pw, confirm string) (userErr, pwErr, confirmErr str
 	case pw == "":
 		pwErr = "Password is required."
 	case len(pw) < minPasswordLen:
-		pwErr = "Password must be at least 8 characters."
+		pwErr = passwordTooShort
 	}
 	if pwErr == "" && confirm != pw {
 		confirmErr = "Passwords don't match."
@@ -111,7 +119,7 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		s.renderLogin(w, web.LoginVM{Theme: themeFrom(r), Banner: "Incorrect username or password", Fields: loginFields(username)})
 		return
 	}
-	if err := s.startSession(w, admin.Username); err != nil {
+	if err := s.startSession(w, admin); err != nil {
 		s.fail(w, "start session", err)
 		return
 	}
@@ -124,6 +132,107 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearSessionCookie(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+// --- settings ---
+
+func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
+	s.renderSettings(w, web.SettingsVM{
+		Chrome: s.chrome(r, "settings"),
+		Done:   r.URL.Query().Get("changed") == "1",
+		Fields: passwordFields("", "", ""),
+	})
+}
+
+// passwordSubmit rewrites the admin hash and bumps its epoch, which invalidates
+// every existing session at once, then reissues this one. A change made because
+// the old password leaked therefore evicts whoever had it, without signing the
+// operator out of the page they are on.
+func (s *Server) passwordSubmit(w http.ResponseWriter, r *http.Request) {
+	current := r.PostFormValue("current")
+	pw := r.PostFormValue("password")
+	confirm := r.PostFormValue("confirm")
+
+	admin, found, err := s.cfg.Store.GetAdmin()
+	if err != nil {
+		s.fail(w, "read admin", err)
+		return
+	}
+	if !found {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+
+	match, verr := auth.Verify(admin.Hash, current)
+	if verr != nil || !match {
+		slog.Warn("password change rejected: wrong current password")
+		w.WriteHeader(http.StatusUnauthorized)
+		s.renderSettings(w, web.SettingsVM{
+			Chrome: s.chrome(r, "settings"),
+			Banner: "Current password is incorrect",
+			Fields: passwordFields("", "", ""),
+		})
+		return
+	}
+
+	pwErr, confirmErr := validatePassword(pw, confirm, current)
+	if pwErr != "" || confirmErr != "" {
+		w.WriteHeader(http.StatusBadRequest)
+		s.renderSettings(w, web.SettingsVM{
+			Chrome: s.chrome(r, "settings"),
+			Fields: passwordFields("", pwErr, confirmErr),
+		})
+		return
+	}
+
+	hash, err := auth.Hash(pw)
+	if err != nil {
+		s.fail(w, "hash password", err)
+		return
+	}
+	admin.Hash = hash
+	admin.Epoch++
+	if err := s.cfg.Store.PutAdmin(admin); err != nil {
+		s.fail(w, "store admin", err)
+		return
+	}
+	slog.Info("admin password changed; other sessions signed out")
+	// Old sessions are already dead by epoch; this only drops their records.
+	if err := s.cfg.Store.ClearSessions(); err != nil {
+		slog.Warn("clear sessions after password change", "err", err)
+	}
+	if err := s.startSession(w, admin); err != nil {
+		s.fail(w, "start session", err)
+		return
+	}
+	// Redirect rather than render: app.js reloads after a check cycle, and
+	// reloading a POST response would resubmit the old password.
+	http.Redirect(w, r, "/settings?changed=1", http.StatusSeeOther)
+}
+
+// validatePassword checks a new password against the length rule, its confirmation,
+// and the one it replaces; current is compared so a no-op change cannot look like one.
+func validatePassword(pw, confirm, current string) (pwErr, confirmErr string) {
+	switch {
+	case pw == "":
+		pwErr = "Password is required."
+	case len(pw) < minPasswordLen:
+		pwErr = passwordTooShort
+	case pw == current:
+		pwErr = "New password must differ from the current one."
+	}
+	if pwErr == "" && confirm != pw {
+		confirmErr = "Passwords don't match."
+	}
+	return
+}
+
+func passwordFields(currentErr, pwErr, confirmErr string) []web.FieldVM {
+	return []web.FieldVM{
+		{ID: "pw-current", Label: "Current password", Type: "password", Name: "current", Autocomplete: "current-password", Error: currentErr},
+		{ID: "pw-new", Label: "New password", Type: "password", Name: "password", Autocomplete: "new-password", Hint: passwordHint, Error: pwErr},
+		{ID: "pw-confirm", Label: "Confirm new password", Type: "password", Name: "confirm", Autocomplete: "new-password", Error: confirmErr},
+	}
 }
 
 // --- check now ---
@@ -207,6 +316,19 @@ func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
 
 // --- helpers ---
 
+// chrome builds the shared header model for pages that render no data of their
+// own. active is matched against the nav links and the settings cog, so a value
+// naming none of them simply leaves all three unmarked.
+func (s *Server) chrome(r *http.Request, active string) web.ChromeVM {
+	return web.ChromeVM{
+		Active:           active,
+		Theme:            themeFrom(r),
+		LastCycle:        s.lastCycle(time.Time{}),
+		NotificationsOff: s.cfg.NotificationsOff,
+		Checking:         s.checking(),
+	}
+}
+
 func (s *Server) adminExists() bool {
 	exists, err := s.cfg.Store.AdminExists()
 	if err != nil {
@@ -271,6 +393,12 @@ func (s *Server) renderLogin(w http.ResponseWriter, vm web.LoginVM) {
 	}
 }
 
+func (s *Server) renderSettings(w http.ResponseWriter, vm web.SettingsVM) {
+	if err := s.cfg.Renderer.RenderSettings(w, vm); err != nil {
+		slog.Error("render settings", "err", err)
+	}
+}
+
 // fail logs err and returns a bare 500, leaking no detail.
 func (s *Server) fail(w http.ResponseWriter, what string, err error) {
 	slog.Error("web "+what, "err", err)
@@ -297,7 +425,7 @@ func layoutFrom(r *http.Request) string {
 func setupFields(username, userErr, pwErr, confirmErr string) []web.FieldVM {
 	return []web.FieldVM{
 		{ID: "setup-user", Label: "Username", Type: "text", Name: "username", Autocomplete: "username", Value: username, Error: userErr},
-		{ID: "setup-pw", Label: "Password", Type: "password", Name: "password", Autocomplete: "new-password", Error: pwErr},
+		{ID: "setup-pw", Label: "Password", Type: "password", Name: "password", Autocomplete: "new-password", Hint: passwordHint, Error: pwErr},
 		{ID: "setup-pw2", Label: "Confirm password", Type: "password", Name: "confirm", Autocomplete: "new-password", Error: confirmErr},
 	}
 }
