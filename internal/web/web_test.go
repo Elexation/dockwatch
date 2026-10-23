@@ -167,6 +167,25 @@ func TestRepublishedSplit(t *testing.T) {
 	}
 }
 
+func TestBuildDashboardJoinsPinnedTag(t *testing.T) {
+	const pin = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	invs := []inventory.Inventory{{
+		V: 1, Host: "home", Docker: inventory.DockerOK,
+		Containers: []inventory.Container{
+			running("tunnel", "cloudflare/cloudflared:2026.10.3@"+pin, "cloudflare/cloudflared@"+pin, ""),
+		},
+	}}
+	check := func(registryDigest string) []store.CheckResult {
+		return []store.CheckResult{{Ref: "cloudflare/cloudflared:2026.10.3", Kind: "SEMVER", RegistryDigest: registryDigest, Status: store.StatusOK, CheckedAt: fixedNow}}
+	}
+	if row := findRow(BuildDashboard(invs, check(pin), DashboardInput{}).FlatRows, "tunnel"); row == nil || row.State != "current" {
+		t.Errorf("pin matching its tag: got %+v, want current (pending means the row missed the tag's check)", row)
+	}
+	if row := findRow(BuildDashboard(invs, check("sha256:newer"), DashboardInput{}).FlatRows, "tunnel"); row == nil || row.State != "republished" {
+		t.Errorf("tag moved past the pin: got %+v, want republished", row)
+	}
+}
+
 func TestBareNameAuthRendersLocal(t *testing.T) {
 	invs := []inventory.Inventory{{
 		V: 1, Host: "home", Docker: inventory.DockerOK,

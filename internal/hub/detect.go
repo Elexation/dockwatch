@@ -47,11 +47,12 @@ func (k Kind) String() string {
 }
 
 // Classify picks the detection mode: no repo digests means locally built (not checkable), else a parseable tag is SEMVER and the rest DIGEST.
+// It reads the canonical ref, so a digest-pinned tag classifies by its tag.
 func Classify(c inventory.Container) Kind {
 	if len(c.RepoDigests) == 0 {
 		return KindLocal
 	}
-	if tag, ok := tagOf(c.Image); ok && isSemver(tag) {
+	if tag, ok := tagOf(inventory.Ref(c.Image)); ok && isSemver(tag) {
 		return KindSemver
 	}
 	return KindDigest

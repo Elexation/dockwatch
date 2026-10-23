@@ -89,6 +89,16 @@ DockWatch itself:
   as a check error for that image. Only affects images watched by version number;
   mutable tags like `latest` are compared by digest and ignore it.
 
+## Pinned images
+
+An image pinned to a digest (`image: app:1.2.3@sha256:...`) is checked by its tag: a
+newer tag shows as an update, and a rebuild of the pinned tag shows as republished
+until the pin moves to the new digest. Pin the multi-platform index digest, which is
+what `docker buildx imagetools inspect app:1.2.3` prints as `Digest` and what Renovate
+pins; a single-platform digest never matches the tag, so it reads as republished. An
+image pinned by digest alone, with no tag, has nothing to compare and always reads as
+up to date.
+
 ## API
 
 The hub can serve a small JSON API for scripts and assistants; it is off by default.

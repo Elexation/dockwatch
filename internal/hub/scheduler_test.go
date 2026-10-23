@@ -226,6 +226,33 @@ func TestRunCycleFilter(t *testing.T) {
 	}
 }
 
+func TestRunCycleChecksPinnedTag(t *testing.T) {
+	const tagRef = "cloudflare/cloudflared:2026.10.3"
+	repo, _ := repoOf(tagRef)
+	reg := &fakeReg{
+		tags:    map[string][]string{repo: {"2026.10.3", "2026.11.0"}},
+		digests: map[string]string{tagRef: "sha256:idx"},
+	}
+	pin := "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	local := fixedLocal{containers: []inventory.Container{
+		{Image: tagRef + "@" + pin, State: "running", RepoDigests: []string{"cloudflare/cloudflared@" + pin}},
+	}}
+
+	st := openStore(t)
+	s := newPipelineScheduler(t, local, reg, st)
+	s.runCycle(context.Background(), false)
+
+	got, found, err := st.GetCheck(tagRef)
+	if err != nil || !found {
+		t.Fatalf("pinned image not checked under its tag: found=%v err=%v", found, err)
+	}
+	// An empty RegistryDigest would mean the digest was looked up by the pin,
+	// which always answers with itself and hides every republish.
+	if got.Kind != KindSemver.String() || got.Latest != "2026.11.0" || got.RegistryDigest != "sha256:idx" {
+		t.Errorf("pinned result = %+v, want SEMVER, latest 2026.11.0, the tag's digest", got)
+	}
+}
+
 func TestRunCycleForceBypassesCache(t *testing.T) {
 	const ref = "gitea/gitea:1.24.3"
 	repo, _ := repoOf(ref)
@@ -489,16 +516,22 @@ func TestDedupMergesSpellings(t *testing.T) {
 	c := func(image string) inventory.Container {
 		return inventory.Container{Image: image, State: "running", RepoDigests: []string{"nginx@sha256:x"}}
 	}
+	pinned := inventory.Container{Image: "nginx:latest@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", State: "running",
+		RepoDigests: []string{"nginx@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}}
 	refs := s.dedup([]inventory.Inventory{
 		{Host: "a", Containers: []inventory.Container{c("nginx")}},
 		{Host: "b", Containers: []inventory.Container{c("docker.io/library/nginx:latest")}},
+		{Host: "c", Containers: []inventory.Container{pinned}},
 	})
 	agg, ok := refs["nginx:latest"]
 	if len(refs) != 1 || !ok {
 		t.Fatalf("refs = %v, want one canonical nginx:latest", refs)
 	}
-	if len(agg.hosts) != 2 || agg.byHost["b"] != "sha256:x" {
-		t.Errorf("hosts=%v byHost=%v, want both hosts with their digests", agg.hosts, agg.byHost)
+	if len(agg.hosts) != 3 || agg.byHost["b"] != "sha256:x" {
+		t.Errorf("hosts=%v byHost=%v, want all three hosts with their digests", agg.hosts, agg.byHost)
+	}
+	if got := agg.staleHosts("sha256:x"); len(got) != 1 || got[0] != "c" {
+		t.Errorf("staleHosts = %v, want [c]: the pin holds c on an older build of the tag", got)
 	}
 }
 

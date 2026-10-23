@@ -69,6 +69,9 @@ func TestClassify(t *testing.T) {
 		{"nginx:latest", true, KindDigest},
 		{"nginx", true, KindDigest}, // missing tag defaults to latest
 		{"redis:stable", true, KindDigest},
+		// A digest pin classifies by the tag it pins.
+		{"cloudflare/cloudflared:2026.10.3@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", true, KindSemver},
+		{"nginx:latest@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", true, KindDigest},
 	}
 	for _, tc := range cases {
 		if got := Classify(container(tc.image, tc.digested)); got != tc.want {
