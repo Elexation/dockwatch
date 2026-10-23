@@ -7,6 +7,7 @@ import (
 	"context"
 	"io/fs"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/elexation/dockwatch/internal/inventory"
@@ -36,6 +37,7 @@ type Config struct {
 	LocalName        string // display name for the hub's own host
 	NotificationsOff bool   // DW_NTFY_TOPIC unset
 	SecureCookie     bool   // DW_HTTPS or DW_TRUSTED_PROXY
+	APITokenSHA256   []byte // DW_API_TOKEN_SHA256; nil leaves the API unregistered
 
 	// Check-now wiring into the hub scheduler and poller. Each func is
 	// optional: nil degrades its feature (no manual checks, no agent rows)
@@ -65,6 +67,12 @@ type Server struct {
 	now     func() time.Time
 	ttl     time.Duration
 	guard   *authGuard
+
+	apiMu sync.Mutex
+	// apiTriggered is the last accepted API check, zero before the first. It is
+	// never persisted, so the cooldown runs on the monotonic clock and a
+	// wall-clock jump cannot stretch or skip it.
+	apiTriggered time.Time
 }
 
 // New builds a Server with its routes registered.
@@ -99,6 +107,11 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	if s.cfg.StaticFS != nil {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(s.cfg.StaticFS)))
+	}
+	// Token-gated API, absent unless a token hash is configured.
+	if s.cfg.APITokenSHA256 != nil {
+		mux.HandleFunc("GET /api/v1/status", s.requireToken(s.apiStatus))
+		mux.HandleFunc("POST /api/v1/check", s.requireToken(s.apiCheck))
 	}
 	// SameSite=Strict still sends the session cookie from sibling subdomains;
 	// the cross-origin check rejects those POSTs too.

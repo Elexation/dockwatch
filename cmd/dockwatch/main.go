@@ -261,6 +261,7 @@ func runHub(cfg *config.Config) {
 		LocalName:        cfg.LocalName,
 		NotificationsOff: cfg.NtfyTopic == "",
 		SecureCookie:     cfg.HTTPS || cfg.TrustedProxy,
+		APITokenSHA256:   cfg.APITokenSHA256,
 		Trigger:          sched.Trigger,
 		CheckRunning:     sched.Running,
 		LastCycleDone:    sched.LastCycle,

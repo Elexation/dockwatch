@@ -4,6 +4,9 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -43,6 +46,8 @@ type Config struct {
 	Domain       string
 	TrustedProxy bool
 	ResetAdmin   bool
+
+	APITokenSHA256 []byte // decoded DW_API_TOKEN_SHA256; nil leaves the API unregistered
 }
 
 // IsHub reports whether this process runs the hub role.
@@ -62,7 +67,7 @@ var knownKeys = map[string]bool{
 	"DW_DOCKER_SOCK": true, "DW_LOCAL_NAME": true, "DW_INTERVAL": true,
 	"DW_NTFY_URL": true, "DW_NTFY_TOPIC": true, "DW_NTFY_TOKEN": true,
 	"DW_HTTPS": true, "DW_TLS_CERT": true, "DW_TLS_KEY": true, "DW_DOMAIN": true,
-	"DW_TRUSTED_PROXY": true, "DW_RESET_ADMIN": true,
+	"DW_TRUSTED_PROXY": true, "DW_RESET_ADMIN": true, "DW_API_TOKEN_SHA256": true,
 }
 
 // Load parses environ (entries of the form "KEY=value", as from os.Environ)
@@ -112,6 +117,10 @@ func Load(environ []string) (*Config, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	apiHash, err := parseTokenHash(env["DW_API_TOKEN_SHA256"])
+	if err != nil {
+		return nil, nil, err
+	}
 
 	agents, err := parseAgents(env)
 	if err != nil {
@@ -138,6 +147,8 @@ func Load(environ []string) (*Config, []string, error) {
 		Domain:       domain,
 		TrustedProxy: trustedProxy,
 		ResetAdmin:   resetAdmin,
+
+		APITokenSHA256: apiHash,
 	}
 
 	// Cross-checks; hub-only, as the agent ignores these vars.
@@ -196,6 +207,9 @@ func warnings(env map[string]string, cfg *Config) []string {
 		if u, err := url.Parse(cfg.NtfyURL); err == nil && u.Scheme == "http" {
 			out = append(out, "DW_NTFY_TOKEN is sent unencrypted: DW_NTFY_URL uses http://")
 		}
+	}
+	if cfg.IsHub() && cfg.APITokenSHA256 != nil && !cfg.HTTPS && !cfg.TrustedProxy {
+		out = append(out, "the API token is sent unencrypted: DW_API_TOKEN_SHA256 is set but neither DW_HTTPS nor DW_TRUSTED_PROXY is")
 	}
 
 	var unknown []string
@@ -303,6 +317,19 @@ func parseDomain(v string) (string, error) {
 		}
 	}
 	return v, nil
+}
+
+// parseTokenHash decodes the API token's hex SHA-256; nil if unset. The error
+// never echoes the value, which may be the token itself pasted by mistake.
+func parseTokenHash(v string) ([]byte, error) {
+	if v == "" {
+		return nil, nil
+	}
+	b, err := hex.DecodeString(v)
+	if err != nil || len(b) != sha256.Size {
+		return nil, errors.New(`invalid DW_API_TOKEN_SHA256: must be the token's SHA-256 as 64 hex characters (printf '%s' "$TOKEN" | sha256sum)`)
+	}
+	return b, nil
 }
 
 func parseBool(env map[string]string, key string, def bool) (bool, error) {

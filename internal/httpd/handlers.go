@@ -311,10 +311,8 @@ func (s *Server) checkStatus(w http.ResponseWriter, r *http.Request) {
 		Running   bool   `json:"running"`
 		LastCycle string `json:"lastCycle"`
 	}{Running: s.checking()}
-	if s.cfg.LastCycleDone != nil {
-		if t := s.cfg.LastCycleDone(); !t.IsZero() {
-			st.LastCycle = t.UTC().Format(time.RFC3339Nano)
-		}
+	if t := s.cycleDone(); !t.IsZero() {
+		st.LastCycle = t.UTC().Format(time.RFC3339Nano)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(st); err != nil {
@@ -407,12 +405,20 @@ func (s *Server) checking() bool {
 // when a cycle persisted nothing; fallback covers a fresh restart from
 // persisted state.
 func (s *Server) lastCycle(fallback time.Time) time.Time {
-	if s.cfg.LastCycleDone != nil {
-		if t := s.cfg.LastCycleDone(); !t.IsZero() {
-			return t
-		}
+	if t := s.cycleDone(); !t.IsZero() {
+		return t
 	}
 	return fallback
+}
+
+// cycleDone is the scheduler's completion stamp alone, zero until this process
+// finishes a cycle. The API uses it without lastCycle's fallback, which moves
+// mid-cycle as checks are stored, since a trigger's caller waits for it to move.
+func (s *Server) cycleDone() time.Time {
+	if s.cfg.LastCycleDone == nil {
+		return time.Time{}
+	}
+	return s.cfg.LastCycleDone()
 }
 
 // staleHosts maps each unreachable agent to its last successful poll. The
@@ -424,6 +430,11 @@ func (s *Server) staleHosts() map[string]time.Time {
 		slog.Error("read agents", "err", err)
 		return nil
 	}
+	return staleOf(agents)
+}
+
+// staleOf maps each unreachable agent in agents to its last successful poll.
+func staleOf(agents []store.AgentStatus) map[string]time.Time {
 	out := make(map[string]time.Time, len(agents))
 	for _, a := range agents {
 		if !a.LastOK {

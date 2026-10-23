@@ -89,6 +89,32 @@ DockWatch itself:
   as a check error for that image. Only affects images watched by version number;
   mutable tags like `latest` are compared by digest and ignore it.
 
+## API
+
+The hub can serve a small JSON API for scripts and assistants; it is off by default.
+Mint a token and give the hub only its SHA-256:
+
+```
+TOKEN=$(openssl rand -hex 24)
+printf '%s' "$TOKEN" | sha256sum    # DW_API_TOKEN_SHA256 = these 64 hex characters
+```
+
+The client keeps the token and sends it as `Authorization: Bearer <token>`. A
+48-character token can never be mistaken for the 64-character hash. Serve the API over
+TLS (`DW_HTTPS`, or a proxy with `DW_TRUSTED_PROXY`); the hub warns at startup otherwise.
+
+- `GET /api/v1/status` returns the dashboard as JSON: `hosts` with reachability and
+  Docker status, `counts` per state, and one entry per watched container with its
+  `state` (`update`, `republished`, `rate`, `error`, `current`, `local`, `auth`,
+  `pending`). `checked_at` dates the registry check; on a host with
+  `reachable: false`, the running versions are as of that host's `last_seen`.
+- `POST /api/v1/check` starts a full check like the dashboard's Check now button, at
+  most once per 5 minutes (otherwise 429 with `Retry-After`, or 409 while a check is
+  already running). The response carries the current `last_cycle`; the check is done
+  once the status `last_cycle` moves past it.
+
+Fields are only ever added within `v1`.
+
 ## Moving the image without a registry
 
 Both distribution paths are first-class: push to any registry, or ship the image over

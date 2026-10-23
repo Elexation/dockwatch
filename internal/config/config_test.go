@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +121,8 @@ func TestFailFast(t *testing.T) {
 		{"ntfy url empty fragment", []string{"DW_NTFY_URL=https://ntfy.sh/#"}, "DW_NTFY_URL"},
 		{"ntfy url no hostname", []string{"DW_NTFY_URL=https://:443"}, "DW_NTFY_URL"},
 		{"agent named local", []string{"DW_AGENT_LOCAL_URL=https://h:1"}, "DW_LOCAL_NAME"},
+		{"api hash short", []string{"DW_API_TOKEN_SHA256=abc123"}, "DW_API_TOKEN_SHA256"},
+		{"api hash not hex", []string{"DW_API_TOKEN_SHA256=" + strings.Repeat("z", 64)}, "DW_API_TOKEN_SHA256"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,6 +195,57 @@ func TestPlaintextTokenWarns(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s: warnings = %v, want the plaintext-token warning", u, warns)
+		}
+	}
+}
+
+func TestAPITokenHash(t *testing.T) {
+	sum := sha256.Sum256([]byte("tok"))
+	for _, v := range []string{hex.EncodeToString(sum[:]), strings.ToUpper(hex.EncodeToString(sum[:]))} {
+		cfg, _, err := Load([]string{"DW_NTFY_TOPIC=t", "DW_TRUSTED_PROXY=true", "DW_API_TOKEN_SHA256=" + v})
+		if err != nil {
+			t.Fatalf("%s: err: %v", v, err)
+		}
+		if !bytes.Equal(cfg.APITokenSHA256, sum[:]) {
+			t.Errorf("%s: hash = %x, want %x", v, cfg.APITokenSHA256, sum)
+		}
+	}
+	cfg, _, err := Load([]string{"DW_NTFY_TOPIC=t"})
+	if err != nil || cfg.APITokenSHA256 != nil {
+		t.Errorf("unset: hash = %x, err = %v, want nil and no error", cfg.APITokenSHA256, err)
+	}
+}
+
+func TestAPITokenPastedAsHashNeverEchoed(t *testing.T) {
+	token := strings.Repeat("ab", 24) // the documented 48-hex token, decodes as hex but is too short
+	_, _, err := Load([]string{"DW_API_TOKEN_SHA256=" + token})
+	if err == nil || strings.Contains(err.Error(), token) {
+		t.Errorf("err = %v, want a rejection that does not echo the value", err)
+	}
+}
+
+func TestPlaintextAPITokenWarns(t *testing.T) {
+	sum := sha256.Sum256([]byte("tok"))
+	hash := "DW_API_TOKEN_SHA256=" + hex.EncodeToString(sum[:])
+	for _, tc := range []struct {
+		env  []string
+		want bool
+	}{
+		{[]string{"DW_NTFY_TOPIC=t", hash}, true},
+		{[]string{"DW_NTFY_TOPIC=t", hash, "DW_HTTPS=true"}, false},
+		{[]string{"DW_NTFY_TOPIC=t", hash, "DW_TRUSTED_PROXY=true"}, false},
+		{[]string{"DW_NTFY_TOPIC=t"}, false},
+	} {
+		_, warns, err := Load(tc.env)
+		if err != nil {
+			t.Fatalf("%v: err: %v", tc.env, err)
+		}
+		found := false
+		for _, w := range warns {
+			found = found || strings.Contains(w, "API token is sent unencrypted")
+		}
+		if found != tc.want {
+			t.Errorf("%v: warnings = %v, want plaintext-token warning %v", tc.env, warns, tc.want)
 		}
 	}
 }
