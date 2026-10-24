@@ -32,6 +32,8 @@ html, body { margin: 0; padding: 0; }
   --fs-xl: 15px;
   --fs-2xl: 16px;
   --fs-3xl: 18px;
+  --card-shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 6px 16px oklch(0 0 0 / 0.22);
+  --card-edge: oklch(1 0 0 / 0.05);
 
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   background: var(--bg);
@@ -59,6 +61,8 @@ html, body { margin: 0; padding: 0; }
   --accent: oklch(0.5 0.1 195);
   --on-accent: #fff;
   --accent-text: oklch(0.45 0.1 195);
+  --card-shadow: 0 1px 2px oklch(0.3 0.03 245 / 0.1), 0 6px 16px oklch(0.3 0.03 245 / 0.07);
+  --card-edge: oklch(1 0 0 / 0.7);
 }
 
 .dw-root * { box-sizing: border-box; }
@@ -71,7 +75,8 @@ html, body { margin: 0; padding: 0; }
 .dw-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* header */
-.dw-top { display: flex; align-items: center; gap: 22px; padding: 0 28px; height: 58px; border-bottom: 1px solid var(--line); }
+/* Side padding lines the header up with the capped .dw-main column below it. */
+.dw-top { display: flex; align-items: center; gap: 22px; padding: 0 max(28px, calc(50% - 592px)); height: 58px; border-bottom: 1px solid var(--line); }
 .dw-mark { display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: var(--fs-xl); color: var(--text); text-decoration: none; }
 .dw-glyph { width: 18px; height: 18px; border: 2px solid var(--accent); border-radius: 50%; position: relative; flex: none; }
 .dw-glyph::after { content: ""; position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); top: 50%; left: 50%; transform: translate(-50%, -50%); }
@@ -100,7 +105,7 @@ html, body { margin: 0; padding: 0; }
 .dw-btnprimary { font: inherit; font-weight: 650; color: var(--on-accent); background: var(--accent); border: none; border-radius: 7px; cursor: pointer; }
 .dw-btnprimary:hover:not(:disabled) { filter: brightness(1.06); }
 .dw-btnprimary:disabled { opacity: 0.65; cursor: default; }
-.dw-check { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; white-space: nowrap; min-height: 36px; }
+.dw-check { display: inline-flex; align-items: center; gap: 8px; padding: 8px 18px; white-space: nowrap; min-height: 36px; border-radius: 999px; }
 .dw-checkmob { display: none; }
 /* Busy swap: the server stamps data-checking and app.js toggles it; both states render, CSS shows one. */
 .dw-cycle .busy, .dw-check .busy { display: none; }
@@ -120,13 +125,13 @@ html, body { margin: 0; padding: 0; }
 .dw-toolbar { display: flex; align-items: center; gap: 8px; padding: 16px 28px 14px; flex-wrap: wrap; }
 .dw-field { display: inline-flex; align-items: center; gap: 7px; }
 .dw-field > label { font-size: var(--fs-sm); color: var(--text-3); }
-.dw-select { font: inherit; font-size: var(--fs-md); color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 6px 28px 6px 10px; min-height: var(--ctl-h); appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%); background-position: calc(100% - 14px) 55%, calc(100% - 10px) 55%; background-size: 4px 4px; background-repeat: no-repeat; cursor: pointer; }
+.dw-select { font: inherit; font-size: var(--fs-md); color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 6px 28px 6px 10px; min-height: var(--ctl-h); appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%); background-position: calc(100% - 14px) 55%, calc(100% - 10px) 55%; background-size: 4px 4px; background-repeat: no-repeat; cursor: pointer; }
 .dw-select:hover { border-color: var(--text-3); }
 .dw-countrow { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .dw-count { color: var(--text-3); font-size: var(--fs-base); white-space: nowrap; }
 /* Cycle freshness rides the count line only where .dw-cycle is hidden. */
 .dw-cyclemob { display: none; }
-.dw-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.dw-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .dw-seg button { font: inherit; font-size: var(--fs-base); color: var(--text-2); background: var(--surface); border: none; padding: 6px 12px; min-height: var(--ctl-h); cursor: pointer; }
 .dw-seg button:hover { color: var(--text); }
 .dw-seg button + button { border-left: 1px solid var(--line); }
@@ -139,18 +144,32 @@ html, body { margin: 0; padding: 0; }
 .dw-layouts[data-layout="flat"] .dw-groupedwrap { display: none; }
 
 /* groups & rows */
-.dw-main { padding-bottom: 28px; }
-.dw-group { margin: 0 28px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-.dw-ghead { display: flex; align-items: baseline; gap: 10px; padding: 11px var(--row-pad-x); background: var(--surface-2); border-bottom: 1px solid var(--line); }
-.dw-ghead .hname { font-weight: 700; font-size: var(--fs-md); letter-spacing: 0.02em; }
+/* Capped so a wide window does not strand each name far from its status. */
+.dw-main { max-width: 1240px; margin: 0 auto; padding-bottom: 28px; }
+/* clip, not hidden: hidden makes the card a scroll box, which unpins the sticky host heading. */
+.dw-group { margin: 0 28px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: clip; box-shadow: inset 0 1px 0 var(--card-edge), var(--card-shadow); }
+.dw-ghead { position: sticky; top: 0; z-index: 1; display: flex; align-items: baseline; gap: 10px; padding: 11px var(--row-pad-x); background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.dw-ghead .hname { font-weight: 700; font-size: var(--fs-lg); letter-spacing: 0.02em; }
 .dw-ghead .hmeta { color: var(--text-3); font-size: var(--fs-sm); }
 .dw-ghead .hup { margin-left: auto; color: var(--accent); font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
 
-.dw-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 300px) 120px 80px; gap: 16px; align-items: center; padding: var(--row-pad-y) var(--row-pad-x); border-bottom: 1px solid var(--line); }
-.dw-row.flat { grid-template-columns: 76px minmax(200px, 1fr) minmax(230px, 280px) 104px 80px; }
+/* Named areas, because the health dot shares the name's cell and is absent on rows without a health check. */
+.dw-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 300px) 120px 80px; grid-template-areas: "main ver health time"; gap: 16px; align-items: center; padding: var(--row-pad-y) var(--row-pad-x); border-bottom: 1px solid var(--line); }
+.dw-row.flat { grid-template-columns: 76px minmax(200px, 1fr) minmax(230px, 280px) 104px 80px; grid-template-areas: "host main ver health time"; }
 .dw-row:last-child { border-bottom: none; }
 .dw-row:hover { background: color-mix(in oklab, var(--surface-2) 55%, var(--surface)); }
-.dw-host { font-size: var(--fs-2xs); color: var(--text-2); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; justify-self: start; }
+/* A stripe marks the rows that need action; the muted states stay unmarked. */
+.dw-row[data-state="update"] { box-shadow: inset 3px 0 0 var(--accent); }
+.dw-row[data-state="republished"] { box-shadow: inset 3px 0 0 var(--warn); }
+.dw-host { grid-area: host; font-size: var(--fs-2xs); color: var(--text-2); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; justify-self: start; }
+.dw-cmain { grid-area: main; padding-left: 18px; }
+/* Centred on the name's line, the first of the two in the cell. */
+.dw-mdot { grid-area: main; justify-self: start; align-self: start; width: 8px; height: 8px; margin-top: calc((var(--fs-md) * 1.45 - 8px) / 2); }
+.dw-mdot.healthy { background: var(--ok); }
+.dw-mdot.unhealthy { background: var(--bad); }
+.dw-mdot.starting { background: var(--warn); }
+.dw-cell-health { grid-area: health; }
+.dw-cell-time { grid-area: time; }
 
 /* Stale: the host's agent is unreachable, so its rows are the last known
    snapshot. Dimmed rather than hidden, and restored on hover to stay readable. */
@@ -172,17 +191,17 @@ html, body { margin: 0; padding: 0; }
 .dw-mut { color: var(--text-3); }
 .dw-repub { color: var(--warn); font-weight: 600; }
 .dw-checking { color: var(--accent-text); font-style: italic; }
+/* Status reads as a pill; the six muted states share one tone, told apart by text. */
+.dw-row .dw-ver { grid-area: ver; justify-self: start; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); font-size: var(--fs-sm); line-height: 1.35; white-space: nowrap; }
+.dw-row .dw-ver.dw-mut { color: var(--text-2); }
+.dw-row .dw-repub { background: var(--warn-bg); }
+.dw-row[data-state="update"] .dw-ver { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); }
 
-.dw-health { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-base); color: var(--text-2); justify-self: start; }
-.dw-health.healthy .hd { background: var(--ok); }
-.dw-health.unhealthy .hd { background: var(--bad); }
-.dw-health.starting .hd { background: var(--warn); }
-.dw-health.none { color: var(--text-3); }
+.dw-health { font-size: var(--fs-sm); font-weight: 600; }
+.dw-health.unhealthy { color: var(--bad); }
+.dw-health.starting { color: var(--warn); }
 .dw-time { color: var(--text-3); font-size: var(--fs-base); text-align: right; white-space: nowrap; }
-.dw-mobilefoot, .dw-mdot { display: none; }
-.dw-mdot.healthy { background: var(--ok); }
-.dw-mdot.unhealthy { background: var(--bad); }
-.dw-mdot.starting { background: var(--warn); }
+.dw-mobilefoot { display: none; }
 
 .dw-empty { margin: 48px 28px; text-align: center; color: var(--text-3); }
 .dw-empty .big { font-size: var(--fs-xl); color: var(--text-2); font-weight: 600; margin-bottom: 6px; }
@@ -205,6 +224,7 @@ html, body { margin: 0; padding: 0; }
 .dw-authfoot { text-align: center; color: var(--text-3); font-size: var(--fs-xs); margin-top: 16px; }
 /* Same form card, but inside the app chrome rather than a centred logged-out page. */
 .dw-formpage { max-width: 420px; margin: 4px 28px 28px; display: grid; gap: 14px; }
+.dw-formpage .dw-authbox { border-radius: 14px; box-shadow: inset 0 1px 0 var(--card-edge), var(--card-shadow); }
 .dw-formpage h2 { font-size: var(--fs-xl); font-weight: 650; margin: 0; }
 .dw-sectsub { color: var(--text-3); font-size: var(--fs-base); margin: -6px 0 2px; }
 .dw-fields { display: grid; gap: 14px; }
@@ -215,7 +235,7 @@ html, body { margin: 0; padding: 0; }
 
 /* agents */
 .dw-agents { display: grid; gap: 14px; margin: 4px 28px 28px; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
-.dw-agent { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; }
+.dw-agent { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; box-shadow: inset 0 1px 0 var(--card-edge), var(--card-shadow); }
 .dw-agent .ahead { display: flex; align-items: center; gap: 10px; }
 .dw-agent .aname { font-weight: 700; font-size: var(--fs-lg); }
 .dw-reach { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-sm); font-weight: 600; border-radius: 999px; padding: 3px 10px; margin-left: auto; white-space: nowrap; }
@@ -241,12 +261,6 @@ html, body { margin: 0; padding: 0; }
     --ctl-h: 44px;
     --fs-3xs: 11px; --fs-2xs: 12px; --fs-xs: 12.5px; --fs-sm: 13px; --fs-base: 14px;
     --fs-md: 15px; --fs-lg: 16px; --fs-xl: 17px; --fs-2xl: 19px; --fs-3xl: 20px;
-    --card-shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 6px 16px oklch(0 0 0 / 0.22);
-    --card-edge: oklch(1 0 0 / 0.05);
-  }
-  .dw-root[data-theme="light"] {
-    --card-shadow: 0 1px 2px oklch(0.3 0.03 245 / 0.1), 0 6px 16px oklch(0.3 0.03 245 / 0.07);
-    --card-edge: oklch(1 0 0 / 0.7);
   }
 
   /* One header row: brand, nav and Settings. Theme and Sign out live on the
@@ -270,19 +284,18 @@ html, body { margin: 0; padding: 0; }
   .dw-toolbar .dw-field > label, .dw-seglbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .dw-toolbar .dw-field:nth-child(-n+2) { flex: 1 1 auto; }
   .dw-toolbar .dw-field:nth-child(-n+2) .dw-select { flex: 1 1 auto; }
-  .dw-select { font-size: var(--fs-base); border-radius: 10px; padding: 6px 24px 6px 9px; background-position: calc(100% - 12px) 55%, calc(100% - 8px) 55%; }
-  .dw-seg { border-radius: 10px; }
+  .dw-select { font-size: var(--fs-base); padding: 6px 24px 6px 9px; background-position: calc(100% - 12px) 55%, calc(100% - 8px) 55%; }
   .dw-seg button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 0 10px; }
   .dw-segico { display: block; }
   .dw-countrow { width: 100%; margin-left: 0; }
   .dw-count { flex: 1; white-space: normal; font-size: var(--fs-sm); }
   .dw-cyclemob { display: inline; }
-  .dw-checkmob { display: inline-flex; flex: none; min-height: var(--ctl-h); padding: 0 16px; border-radius: 999px; }
+  .dw-checkmob { display: inline-flex; flex: none; min-height: var(--ctl-h); padding: 0 16px; }
 
   /* Each container is its own raised card. The host heading sits on the page
      and stays pinned while that host's cards scroll under it. */
-  .dw-group { margin: 0 0 10px; background: none; border: 0; border-radius: 0; overflow: visible; }
-  .dw-ghead { position: sticky; top: 0; z-index: 1; padding: 12px 18px 8px; border-bottom: 0; flex-wrap: wrap; row-gap: 4px;
+  .dw-group { margin: 0 0 10px; background: none; border: 0; border-radius: 0; overflow: visible; box-shadow: none; }
+  .dw-ghead { padding: 12px 18px 8px; border-bottom: 0; flex-wrap: wrap; row-gap: 4px;
     background: color-mix(in oklab, var(--bg) 85%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   .dw-ghead .hname { font-size: var(--fs-xl); letter-spacing: 0; }
   .dw-empty { margin: 48px 14px; }
@@ -304,28 +317,20 @@ html, body { margin: 0; padding: 0; }
   .dw-row.flat { grid-template-areas: "dot name ver" ". img img" ". host host" ". foot foot"; }
   .dw-row:last-child { border-bottom: 1px solid var(--line); }
   .dw-row:hover { background: var(--surface); }
-  /* A stripe marks the rows that need action; the muted states stay unmarked. */
   .dw-row[data-state="update"] { box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 var(--card-edge), var(--card-shadow); }
   .dw-row[data-state="republished"] { box-shadow: inset 3px 0 0 var(--warn), inset 0 1px 0 var(--card-edge), var(--card-shadow); }
   .dw-cmain { display: contents; }
   .dw-cname { grid-area: name; min-width: 0; font-size: 15.5px; font-weight: 650; }
   .dw-cimg { grid-area: img; margin-top: 4px; }
-  .dw-mdot { display: block; grid-area: dot; width: 8px; height: 8px; }
-  .dw-row .dw-ver { grid-area: ver; justify-self: end; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); font-size: var(--fs-sm); line-height: 1.35; white-space: nowrap; }
-  .dw-row .dw-ver.dw-mut { color: var(--text-2); }
-  .dw-row .dw-repub { background: var(--warn-bg); }
-  .dw-row[data-state="update"] .dw-ver { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); }
-  .dw-row.flat .dw-host { grid-area: host; justify-self: start; margin-top: 6px; }
+  .dw-mdot { grid-area: dot; align-self: center; margin-top: 0; }
+  .dw-row .dw-ver { justify-self: end; }
+  .dw-row.flat .dw-host { margin-top: 6px; }
   .dw-cell-health, .dw-cell-time { display: none; }
   .dw-mobilefoot { grid-area: foot; display: flex; align-items: center; gap: 10px; margin-top: 6px; }
-  .dw-mobilefoot .dw-health { font-size: var(--fs-sm); font-weight: 600; }
-  .dw-mobilefoot .dw-health.unhealthy { color: var(--bad); }
-  .dw-mobilefoot .dw-health.starting { color: var(--warn); }
   .dw-mobilefoot .dw-time { font-size: var(--fs-sm); text-align: left; }
 
   /* Baseline-aligned heading and subtitle both wrap at phone widths and interleave. */
   .dw-pagehead { padding: 16px 14px 10px; flex-direction: column; align-items: flex-start; gap: 2px; }
   .dw-agents { margin: 4px 12px 20px; grid-template-columns: 1fr; gap: 10px; }
   .dw-formpage { margin: 4px 12px 20px; }
-  .dw-agent, .dw-formpage .dw-authbox { border-radius: 14px; box-shadow: inset 0 1px 0 var(--card-edge), var(--card-shadow); }
 }

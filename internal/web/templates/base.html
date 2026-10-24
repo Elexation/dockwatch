@@ -15,8 +15,8 @@
 <head>{{template "head" .Title}}</head>
 <body>
 {{template "header" .Chrome}}
-{{if .Chrome.NotificationsOff}}{{template "notice"}}{{end}}
 <main class="dw-main">
+{{if .Chrome.NotificationsOff}}{{template "notice"}}{{end}}
 {{- end}}
 
 {{define "appclose" -}}
@@ -142,10 +142,10 @@
 	</div>
 	{{if or $alert (eq $r.Health "healthy")}}<span class="dw-dot dw-mdot {{$r.Health}}" title="{{$r.Health}}"><span class="dw-vh">{{$r.Health}}</span></span>{{end}}
 	{{template "versioncell" $r}}
-	<span class="dw-cell-health">{{template "healthbadge" $r.Health}}</span>
+	<span class="dw-cell-health">{{if $alert}}{{template "healthword" $r.Health}}{{end}}</span>
 	<span class="dw-time dw-cell-time">{{template "rowtime" $r}}</span>
 	{{if or $alert $r.Stale}}<div class="dw-mobilefoot">
-		{{if $alert}}<span class="dw-health {{$r.Health}}" aria-hidden="true">{{$r.Health}}</span>{{end}}
+		{{if $alert}}{{template "healthword" $r.Health}}{{end}}
 		{{if $r.Stale}}<span class="dw-time">last seen {{template "rowtime" $r}}</span>{{end}}
 	</div>{{end}}
 </div>
@@ -177,12 +177,9 @@ checked: refs shared with a live host would otherwise read "just now" here. */}}
 {{- end}}
 {{- end}}
 
-{{define "healthbadge" -}}
-{{if or (eq . "healthy") (eq . "unhealthy") (eq . "starting") -}}
-<span class="dw-health {{.}}"><span class="dw-dot hd" aria-hidden="true"></span>{{.}}</span>
-{{- else -}}
-<span class="dw-health none" title="No health check configured">-</span>
-{{- end}}
+{{/* The dot beside the name already tells screen readers, so the word is hidden from them. */}}
+{{define "healthword" -}}
+<span class="dw-health {{.}}" aria-hidden="true">{{.}}</span>
 {{- end}}
 
 {{define "agentcard" -}}

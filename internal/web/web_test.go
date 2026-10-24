@@ -219,7 +219,7 @@ func TestRenderShortensPinnedDigest(t *testing.T) {
 	}
 }
 
-func TestRenderMobileRowParts(t *testing.T) {
+func TestRenderRowParts(t *testing.T) {
 	r := testRenderer()
 	invs, checks, in := sampleDashboard()
 	var buf bytes.Buffer
@@ -230,8 +230,12 @@ func TestRenderMobileRowParts(t *testing.T) {
 	assertContains(t, "dashboard", out,
 		`class="dw-dot dw-mdot healthy" title="healthy"><span class="dw-vh">healthy</span>`,
 		`class="dw-dot dw-mdot unhealthy"`,
-		`<span class="dw-health unhealthy" aria-hidden="true">unhealthy</span>`,
+		`<span class="dw-cell-health"><span class="dw-health unhealthy" aria-hidden="true">unhealthy</span></span>`,
+		`<span class="dw-cell-health"></span>`,
 		`class="dw-btnprimary dw-check dw-checkmob"`)
+	if strings.Contains(out, "No health check configured") {
+		t.Error("health cell still renders the placeholder dash")
+	}
 	if n := strings.Count(out, "data-dw-check"); n != 2 {
 		t.Errorf("dashboard has %d check buttons, want 2 (header and mobile toolbar)", n)
 	}
