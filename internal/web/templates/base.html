@@ -56,10 +56,23 @@
 		<span class="dw-cycle">last cycle: <span class="idle">{{reltimeOrDash .LastCycle}}</span><span class="busy">running…</span></span>
 		<a class="dw-btnghost dw-cog" href="/settings" aria-label="Settings" title="Settings"{{if eq .Active "settings"}} aria-current="page"{{end}}>{{template "coglyph"}}</a>
 		<button class="dw-btnghost dw-themectl" type="button" data-dw-theme aria-label="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme" title="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme"><span class="dw-themeglyph" aria-hidden="true"></span></button>
-		<button class="dw-btnprimary dw-check" type="button" data-dw-check{{if .Checking}} disabled data-dw-checking{{end}}><span class="idle">Check now</span><span class="busy"><span class="dw-spin" aria-hidden="true"></span>Checking…</span></button>
+		{{template "checkbtn" (dict "Checking" .Checking "Mobile" false)}}
 		<form class="dw-logout" method="post" action="/logout"><button class="dw-btnghost dw-signout" type="submit">Sign out</button></form>
 	</div>
 </header>
+{{- end}}
+
+{{/* The header copy serves desktop and the toolbar copy serves phones; app.js drives both as one. */}}
+{{define "checkbtn" -}}
+<button class="dw-btnprimary dw-check{{if .Mobile}} dw-checkmob{{end}}" type="button" data-dw-check{{if .Checking}} disabled data-dw-checking{{end}}><span class="idle">Check now</span><span class="busy"><span class="dw-spin" aria-hidden="true"></span>Checking…</span></button>
+{{- end}}
+
+{{define "groupedglyph" -}}
+<svg class="dw-segico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/></svg>
+{{- end}}
+
+{{define "flatglyph" -}}
+<svg class="dw-segico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
 {{- end}}
 
 {{define "coglyph" -}}
@@ -94,11 +107,14 @@
 	<span class="dw-field" role="group" aria-label="List view">
 		<label id="dw-viewlabel">View</label>
 		<span class="dw-seg" aria-labelledby="dw-viewlabel" data-dw-seg>
-			<button type="button" class="{{if ne .Chrome.Layout "flat"}}on{{end}}" aria-pressed="{{if ne .Chrome.Layout "flat"}}true{{else}}false{{end}}" data-dw-layout="grouped">grouped</button>
-			<button type="button" class="{{if eq .Chrome.Layout "flat"}}on{{end}}" aria-pressed="{{if eq .Chrome.Layout "flat"}}true{{else}}false{{end}}" data-dw-layout="flat">flat</button>
+			<button type="button" class="{{if ne .Chrome.Layout "flat"}}on{{end}}" aria-pressed="{{if ne .Chrome.Layout "flat"}}true{{else}}false{{end}}" data-dw-layout="grouped">{{template "groupedglyph"}}<span class="dw-seglbl">grouped</span></button>
+			<button type="button" class="{{if eq .Chrome.Layout "flat"}}on{{end}}" aria-pressed="{{if eq .Chrome.Layout "flat"}}true{{else}}false{{end}}" data-dw-layout="flat">{{template "flatglyph"}}<span class="dw-seglbl">flat</span></button>
 		</span>
 	</span>
-	{{if not .Empty}}<span class="dw-count"><span class="dw-countnum">{{.Summary}}</span><span class="dw-cyclemob"> · checked {{reltimeOrDash .Chrome.LastCycle}}</span></span>{{end}}
+	<div class="dw-countrow">
+		{{if not .Empty}}<span class="dw-count"><span class="dw-countnum">{{.Summary}}</span><span class="dw-cyclemob"> · checked {{reltimeOrDash .Chrome.LastCycle}}</span></span>{{end}}
+		{{template "checkbtn" (dict "Checking" .Chrome.Checking "Mobile" true)}}
+	</div>
 </div>
 {{- end}}
 
@@ -117,19 +133,21 @@
 {{define "row" -}}
 {{$r := .R -}}
 {{$img := shortDigest $r.Image -}}
+{{$alert := or (eq $r.Health "unhealthy") (eq $r.Health "starting") -}}
 <div class="dw-row{{if .Flat}} flat{{end}}{{if $r.Stale}} stale{{end}}" data-host="{{$r.Host}}" data-state="{{$r.State}}">
 	{{if .Flat}}<span class="dw-host mono{{if $r.Stale}} stale{{end}}"{{if $r.Stale}} title="Host unreachable"{{end}}>{{$r.Host}}</span>{{end}}
-	<div>
+	<div class="dw-cmain">
 		<div class="dw-cname">{{$r.Name}}</div>
 		<div class="dw-cimg mono"{{if ne $img $r.Image}} title="{{$r.Image}}"{{end}}>{{wbrImageRef $img}}</div>
 	</div>
+	{{if or $alert (eq $r.Health "healthy")}}<span class="dw-dot dw-mdot {{$r.Health}}" title="{{$r.Health}}"><span class="dw-vh">{{$r.Health}}</span></span>{{end}}
 	{{template "versioncell" $r}}
 	<span class="dw-cell-health">{{template "healthbadge" $r.Health}}</span>
 	<span class="dw-time dw-cell-time">{{template "rowtime" $r}}</span>
-	<div class="dw-mobilefoot">
-		{{template "healthbadge" $r.Health}}
-		<span class="dw-time">{{template "rowtime" $r}}</span>
-	</div>
+	{{if or $alert $r.Stale}}<div class="dw-mobilefoot">
+		{{if $alert}}<span class="dw-health {{$r.Health}}" aria-hidden="true">{{$r.Health}}</span>{{end}}
+		{{if $r.Stale}}<span class="dw-time">last seen {{template "rowtime" $r}}</span>{{end}}
+	</div>{{end}}
 </div>
 {{- end}}
 

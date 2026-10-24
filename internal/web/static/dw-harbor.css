@@ -67,6 +67,8 @@ html, body { margin: 0; padding: 0; }
 .dw-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 /* Tinted badge: each variant supplies --tone (and optionally --tone-bg). */
 .dw-tone { color: var(--tone); border: 1px solid var(--tone); background: var(--tone-bg, transparent); }
+/* Visually hidden but still read by screen readers. */
+.dw-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* header */
 .dw-top { display: flex; align-items: center; gap: 22px; padding: 0 28px; height: 58px; border-bottom: 1px solid var(--line); }
@@ -99,6 +101,7 @@ html, body { margin: 0; padding: 0; }
 .dw-btnprimary:hover:not(:disabled) { filter: brightness(1.06); }
 .dw-btnprimary:disabled { opacity: 0.65; cursor: default; }
 .dw-check { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; white-space: nowrap; min-height: 36px; }
+.dw-checkmob { display: none; }
 /* Busy swap: the server stamps data-checking and app.js toggles it; both states render, CSS shows one. */
 .dw-cycle .busy, .dw-check .busy { display: none; }
 .dw-root[data-checking] .dw-cycle .idle, .dw-root[data-checking] .dw-check .idle { display: none; }
@@ -119,7 +122,8 @@ html, body { margin: 0; padding: 0; }
 .dw-field > label { font-size: var(--fs-sm); color: var(--text-3); }
 .dw-select { font: inherit; font-size: var(--fs-md); color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 6px 28px 6px 10px; min-height: var(--ctl-h); appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%); background-position: calc(100% - 14px) 55%, calc(100% - 10px) 55%; background-size: 4px 4px; background-repeat: no-repeat; cursor: pointer; }
 .dw-select:hover { border-color: var(--text-3); }
-.dw-count { margin-left: auto; color: var(--text-3); font-size: var(--fs-base); white-space: nowrap; }
+.dw-countrow { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.dw-count { color: var(--text-3); font-size: var(--fs-base); white-space: nowrap; }
 /* Cycle freshness rides the count line only where .dw-cycle is hidden. */
 .dw-cyclemob { display: none; }
 .dw-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
@@ -128,6 +132,7 @@ html, body { margin: 0; padding: 0; }
 .dw-seg button + button { border-left: 1px solid var(--line); }
 .dw-seg button.on { color: var(--text); background: var(--surface-2); font-weight: 600; }
 .dw-seg button:focus-visible { outline-offset: -2px; }
+.dw-segico { display: none; }
 
 /* grouped/flat view toggle: render both, show one. */
 .dw-layouts[data-layout="grouped"] .dw-flatwrap { display: none; }
@@ -174,7 +179,10 @@ html, body { margin: 0; padding: 0; }
 .dw-health.starting .hd { background: var(--warn); }
 .dw-health.none { color: var(--text-3); }
 .dw-time { color: var(--text-3); font-size: var(--fs-base); text-align: right; white-space: nowrap; }
-.dw-mobilefoot { display: none; }
+.dw-mobilefoot, .dw-mdot { display: none; }
+.dw-mdot.healthy { background: var(--ok); }
+.dw-mdot.unhealthy { background: var(--bad); }
+.dw-mdot.starting { background: var(--warn); }
 
 .dw-empty { margin: 48px 28px; text-align: center; color: var(--text-3); }
 .dw-empty .big { font-size: var(--fs-xl); color: var(--text-2); font-weight: 600; margin-bottom: 6px; }
@@ -201,6 +209,9 @@ html, body { margin: 0; padding: 0; }
 .dw-sectsub { color: var(--text-3); font-size: var(--fs-base); margin: -6px 0 2px; }
 .dw-fields { display: grid; gap: 14px; }
 .dw-formok { display: flex; gap: 8px; align-items: center; color: var(--ok); background: var(--surface); border: 1px solid var(--ok); border-radius: 7px; padding: 8px 12px; font-size: var(--fs-base); }
+.dw-setrow { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: var(--fs-base); color: var(--text-2); }
+/* Outlined ghost button for a secondary action inside a card. */
+.dw-btnline { border-color: var(--line); color: var(--text-2); padding: 0 16px; }
 
 /* agents */
 .dw-agents { display: grid; gap: 14px; margin: 4px 28px 28px; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
@@ -225,41 +236,96 @@ html, body { margin: 0; padding: 0; }
 
 /* responsive: the app is the viewport, so these track the window width. */
 @media (max-width: 760px) {
-  /* The header does not fit one row at phone widths; wrap rather than clip the controls. */
-  .dw-top { padding: 8px 14px; gap: 8px; height: auto; flex-wrap: wrap; }
-  .dw-mark { font-size: var(--fs-lg); gap: 7px; min-height: 44px; }
-  .dw-nav { gap: 2px; }
-  .dw-nav a { display: flex; align-items: center; min-height: 44px; padding: 0 10px; }
-  .dw-root { --ctl-h: 44px; }
-  /* margin-left:auto is a one-row rule; once the header wraps it strands the
-     cluster mid-row, aligned to nothing. Fill the row and let Check now take
-     the slack so both edges sit on the same 14px gutter as every band below. */
-  .dw-top-right { margin-left: 0; width: 100%; gap: 10px; }
-  .dw-check { padding: 8px 12px; min-height: 44px; flex: 1; justify-content: center; }
-  .dw-themectl, .dw-cog { min-width: 44px; }
+  /* Phones are read at arm's length, so the whole type scale steps up. */
+  .dw-root {
+    --ctl-h: 44px;
+    --fs-3xs: 11px; --fs-2xs: 12px; --fs-xs: 12.5px; --fs-sm: 13px; --fs-base: 14px;
+    --fs-md: 15px; --fs-lg: 16px; --fs-xl: 17px; --fs-2xl: 19px; --fs-3xl: 20px;
+    --card-shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 6px 16px oklch(0 0 0 / 0.22);
+    --card-edge: oklch(1 0 0 / 0.05);
+  }
+  .dw-root[data-theme="light"] {
+    --card-shadow: 0 1px 2px oklch(0.3 0.03 245 / 0.1), 0 6px 16px oklch(0.3 0.03 245 / 0.07);
+    --card-edge: oklch(1 0 0 / 0.7);
+  }
+
+  /* One header row: brand, nav and Settings. Theme and Sign out live on the
+     Settings page and Check now sits by the dashboard count; the row wraps only
+     on screens too narrow for it. */
+  .dw-top { padding: 6px 6px 6px 14px; gap: 6px; height: auto; min-height: 56px; flex-wrap: wrap; }
+  .dw-mark { font-size: var(--fs-lg); gap: 7px; min-height: 44px; margin-right: 4px; }
+  .dw-nav { gap: 0; }
+  .dw-nav a { display: flex; align-items: center; min-height: 44px; padding: 0 10px; font-size: var(--fs-base); }
+  .dw-top-right { gap: 0; }
+  .dw-top .dw-check, .dw-themectl, .dw-logout, .dw-cycle { display: none; }
+  .dw-cog { min-width: 44px; }
   .dw-input { min-height: 44px; }
-  .dw-cycle { display: none; }
   .dw-notice { margin: 12px 14px 0; }
-  .dw-toolbar { padding: 14px 14px 12px; }
-  /* Host and Status share row one evenly. Basis stays auto and min-width is left
-     at its flex default so the selects grow into free space but never shrink
-     below their own option text; View keeps its width and wraps below. */
+
+  /* Host, Status and an icon-only View share row one, labels kept for screen
+     readers. Basis stays auto and min-width is left at its flex default so the
+     selects grow into free space but never shrink below their own option text;
+     a screen too narrow for all three wraps View instead of clipping a select. */
+  .dw-toolbar { padding: 12px 14px 6px; gap: 6px; }
+  .dw-toolbar .dw-field > label, .dw-seglbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .dw-toolbar .dw-field:nth-child(-n+2) { flex: 1 1 auto; }
   .dw-toolbar .dw-field:nth-child(-n+2) .dw-select { flex: 1 1 auto; }
-  .dw-seg button { min-width: 44px; }
-  .dw-count { width: 100%; margin-left: 0; white-space: normal; }
+  .dw-select { font-size: var(--fs-base); border-radius: 10px; padding: 6px 24px 6px 9px; background-position: calc(100% - 12px) 55%, calc(100% - 8px) 55%; }
+  .dw-seg { border-radius: 10px; }
+  .dw-seg button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 0 10px; }
+  .dw-segico { display: block; }
+  .dw-countrow { width: 100%; margin-left: 0; }
+  .dw-count { flex: 1; white-space: normal; font-size: var(--fs-sm); }
   .dw-cyclemob { display: inline; }
-  .dw-group { margin: 0 14px 14px; }
+  .dw-checkmob { display: inline-flex; flex: none; min-height: var(--ctl-h); padding: 0 16px; border-radius: 999px; }
+
+  /* Each container is its own raised card. The host heading sits on the page
+     and stays pinned while that host's cards scroll under it. */
+  .dw-group { margin: 0 0 10px; background: none; border: 0; border-radius: 0; overflow: visible; }
+  .dw-ghead { position: sticky; top: 0; z-index: 1; padding: 12px 18px 8px; border-bottom: 0; flex-wrap: wrap; row-gap: 4px;
+    background: color-mix(in oklab, var(--bg) 85%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .dw-ghead .hname { font-size: var(--fs-xl); letter-spacing: 0; }
   .dw-empty { margin: 48px 14px; }
+
+  /* Health dot, name and status pill on line one; the image ref below takes the
+     full width. A bare 1fr cannot shrink below its longest unbreakable word, so
+     the name track is minmax(0, 1fr). The foot line renders only for an
+     unhealthy or starting container, or a stale row's last-seen time; lines are
+     spaced by margins, since a row gap would pad the empty foot track too. */
+  .dw-row, .dw-row.flat {
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    grid-template-areas: "dot name ver" ". img img" ". foot foot";
+    gap: 0 10px; align-items: center; margin: 0 12px 8px; padding: 12px 14px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: inset 0 1px 0 var(--card-edge), var(--card-shadow);
+  }
+  /* The host pill gets its own line: beside the image it would share the status
+     pill's column and squeeze long refs. */
+  .dw-row.flat { grid-template-areas: "dot name ver" ". img img" ". host host" ". foot foot"; }
+  .dw-row:last-child { border-bottom: 1px solid var(--line); }
+  .dw-row:hover { background: var(--surface); }
+  /* A stripe marks the rows that need action; the muted states stay unmarked. */
+  .dw-row[data-state="update"] { box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 var(--card-edge), var(--card-shadow); }
+  .dw-row[data-state="republished"] { box-shadow: inset 3px 0 0 var(--warn), inset 0 1px 0 var(--card-edge), var(--card-shadow); }
+  .dw-cmain { display: contents; }
+  .dw-cname { grid-area: name; min-width: 0; font-size: 15.5px; font-weight: 650; }
+  .dw-cimg { grid-area: img; margin-top: 4px; }
+  .dw-mdot { display: block; grid-area: dot; width: 8px; height: 8px; }
+  .dw-row .dw-ver { grid-area: ver; justify-self: end; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); font-size: var(--fs-sm); line-height: 1.35; white-space: nowrap; }
+  .dw-row .dw-ver.dw-mut { color: var(--text-2); }
+  .dw-row .dw-repub { background: var(--warn-bg); }
+  .dw-row[data-state="update"] .dw-ver { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); }
+  .dw-row.flat .dw-host { grid-area: host; justify-self: start; margin-top: 6px; }
+  .dw-cell-health, .dw-cell-time { display: none; }
+  .dw-mobilefoot { grid-area: foot; display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .dw-mobilefoot .dw-health { font-size: var(--fs-sm); font-weight: 600; }
+  .dw-mobilefoot .dw-health.unhealthy { color: var(--bad); }
+  .dw-mobilefoot .dw-health.starting { color: var(--warn); }
+  .dw-mobilefoot .dw-time { font-size: var(--fs-sm); text-align: left; }
+
   /* Baseline-aligned heading and subtitle both wrap at phone widths and interleave. */
   .dw-pagehead { padding: 16px 14px 10px; flex-direction: column; align-items: flex-start; gap: 2px; }
-  .dw-agents { margin: 4px 14px 20px; grid-template-columns: 1fr; }
-  .dw-formpage { margin: 4px 14px 20px; }
-  /* A bare 1fr cannot shrink below its longest unbreakable word and pushes the row past the card. */
-  .dw-row, .dw-row.flat { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 11px var(--row-pad-x); }
-  .dw-row.flat .dw-host { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; }
-  .dw-row .dw-ver { grid-column: 1 / -1; }
-  .dw-cell-health, .dw-cell-time { display: none; }
-  .dw-mobilefoot { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
-  .dw-mobilefoot .dw-time { margin-left: auto; }
+  .dw-agents { margin: 4px 12px 20px; grid-template-columns: 1fr; gap: 10px; }
+  .dw-formpage { margin: 4px 12px 20px; }
+  .dw-agent, .dw-formpage .dw-authbox { border-radius: 14px; box-shadow: inset 0 1px 0 var(--card-edge), var(--card-shadow); }
 }

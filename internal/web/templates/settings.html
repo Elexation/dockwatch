@@ -2,7 +2,7 @@
 {{template "appopen" (dict "Chrome" .Chrome "Title" "Settings")}}
 	<div class="dw-pagehead">
 		<h1>Settings</h1>
-		<span class="sub">this hub's admin account</span>
+		<span class="sub">admin account, theme and sign out</span>
 	</div>
 	<div class="dw-formpage">
 		<section class="dw-authbox" aria-labelledby="set-pw">
@@ -14,6 +14,21 @@
 				{{range .Fields}}{{template "field" .}}{{end}}
 				<button class="dw-btnprimary dw-submit" type="submit">Change password</button>
 			</form>
+		</section>
+		<section class="dw-authbox" aria-labelledby="set-look">
+			<h2 id="set-look">Appearance</h2>
+			<p class="dw-sectsub">Saved in this browser.</p>
+			<div class="dw-setrow">
+				<span id="dw-themelabel">Theme</span>
+				<span class="dw-seg" role="group" aria-labelledby="dw-themelabel">
+					<button type="button" class="{{if ne .Chrome.Theme "light"}}on{{end}}" aria-pressed="{{if ne .Chrome.Theme "light"}}true{{else}}false{{end}}" data-dw-themeset="dark">Dark</button>
+					<button type="button" class="{{if eq .Chrome.Theme "light"}}on{{end}}" aria-pressed="{{if eq .Chrome.Theme "light"}}true{{else}}false{{end}}" data-dw-themeset="light">Light</button>
+				</span>
+			</div>
+		</section>
+		<section class="dw-authbox" aria-labelledby="set-session">
+			<h2 id="set-session">Session</h2>
+			<form method="post" action="/logout"><button class="dw-btnghost dw-btnline" type="submit">Sign out</button></form>
 		</section>
 	</div>
 {{template "appclose"}}

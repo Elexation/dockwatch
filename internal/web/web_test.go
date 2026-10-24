@@ -219,6 +219,52 @@ func TestRenderShortensPinnedDigest(t *testing.T) {
 	}
 }
 
+func TestRenderMobileRowParts(t *testing.T) {
+	r := testRenderer()
+	invs, checks, in := sampleDashboard()
+	var buf bytes.Buffer
+	if err := r.RenderDashboard(&buf, BuildDashboard(invs, checks, in)); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	assertContains(t, "dashboard", out,
+		`class="dw-dot dw-mdot healthy" title="healthy"><span class="dw-vh">healthy</span>`,
+		`class="dw-dot dw-mdot unhealthy"`,
+		`<span class="dw-health unhealthy" aria-hidden="true">unhealthy</span>`,
+		`class="dw-btnprimary dw-check dw-checkmob"`)
+	if n := strings.Count(out, "data-dw-check"); n != 2 {
+		t.Errorf("dashboard has %d check buttons, want 2 (header and mobile toolbar)", n)
+	}
+
+	// A healthy row on a live host has nothing for the mobile foot line.
+	quiet := []inventory.Inventory{{V: 1, Host: "home", Docker: inventory.DockerOK, Containers: []inventory.Container{
+		running("app", "team/app:1.2.3", "team/app@sha256:a", "healthy"),
+	}}}
+	buf.Reset()
+	if err := r.RenderDashboard(&buf, BuildDashboard(quiet, nil, DashboardInput{})); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(buf.String(), "dw-mobilefoot") {
+		t.Error("healthy live row rendered an empty mobile foot")
+	}
+}
+
+func TestRenderSettingsAppearance(t *testing.T) {
+	var buf bytes.Buffer
+	if err := testRenderer().RenderSettings(&buf, settingsClean()); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	assertContains(t, "settings", out,
+		`class="on" aria-pressed="true" data-dw-themeset="dark"`,
+		`class="" aria-pressed="false" data-dw-themeset="light"`,
+		`<button class="dw-btnghost dw-btnline" type="submit">Sign out</button>`)
+	if n := strings.Count(out, `action="/logout"`); n != 2 {
+		t.Errorf("settings has %d sign-out forms, want 2 (header and page)", n)
+	}
+	assertNoBannedGlyph(t, "settings", out)
+}
+
 func TestBareNameAuthRendersLocal(t *testing.T) {
 	invs := []inventory.Inventory{{
 		V: 1, Host: "home", Docker: inventory.DockerOK,
@@ -389,7 +435,8 @@ func TestRenderDashboardStaleHost(t *testing.T) {
 		`class="dw-row flat stale"`,
 		`class="dw-host mono stale" title="Host unreachable"`,
 		// the row time is the host's last-seen stamp, not the ref's CheckedAt
-		`<span class="dw-time dw-cell-time">9h ago</span>`)
+		`<span class="dw-time dw-cell-time">9h ago</span>`,
+		`<span class="dw-time">last seen 9h ago</span>`)
 	if strings.Contains(out, `aria-label="Host home, unreachable"`) {
 		t.Error("reachable host rendered as unreachable")
 	}

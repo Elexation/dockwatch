@@ -13,22 +13,43 @@
 		try { document.cookie = "dw_theme=" + v + "; path=/; max-age=31536000; samesite=strict"; } catch (e) {}
 	}
 
-	var theme = readTheme();
-	root.setAttribute("data-theme", theme);
-
-	var themeBtn = document.querySelector("[data-dw-theme]");
-	function labelThemeBtn() {
-		var to = "Switch to " + (theme === "light" ? "dark" : "light") + " theme";
-		themeBtn.setAttribute("aria-label", to);
-		themeBtn.title = to;
+	// markPressed shows which button of a segmented control holds value v.
+	function markPressed(buttons, attr, v) {
+		for (var i = 0; i < buttons.length; i++) {
+			var on = buttons[i].getAttribute(attr) === v;
+			buttons[i].classList.toggle("on", on);
+			buttons[i].setAttribute("aria-pressed", on ? "true" : "false");
+		}
 	}
+
+	var theme = readTheme();
+
+	// The header toggle flips the theme; the Settings page control sets it.
+	var themeBtn = document.querySelector("[data-dw-theme]");
+	var themeSet = document.querySelectorAll("[data-dw-themeset]");
+	function showTheme() {
+		root.setAttribute("data-theme", theme);
+		if (themeBtn) {
+			var to = "Switch to " + (theme === "light" ? "dark" : "light") + " theme";
+			themeBtn.setAttribute("aria-label", to);
+			themeBtn.title = to;
+		}
+		markPressed(themeSet, "data-dw-themeset", theme);
+	}
+	function setTheme(v) {
+		theme = v;
+		persistTheme(v);
+		showTheme();
+	}
+	showTheme();
 	if (themeBtn) {
-		labelThemeBtn();
 		themeBtn.addEventListener("click", function () {
-			theme = theme === "dark" ? "light" : "dark";
-			persistTheme(theme);
-			root.setAttribute("data-theme", theme);
-			labelThemeBtn();
+			setTheme(theme === "dark" ? "light" : "dark");
+		});
+	}
+	for (var t = 0; t < themeSet.length; t++) {
+		themeSet[t].addEventListener("click", function () {
+			setTheme(this.getAttribute("data-dw-themeset"));
 		});
 	}
 
@@ -43,13 +64,7 @@
 	var seg = document.querySelector("[data-dw-seg]");
 	function applyLayout(v) {
 		if (layouts) layouts.setAttribute("data-layout", v);
-		if (!seg) return;
-		var buttons = seg.querySelectorAll("[data-dw-layout]");
-		for (var i = 0; i < buttons.length; i++) {
-			var on = buttons[i].getAttribute("data-dw-layout") === v;
-			buttons[i].classList.toggle("on", on);
-			buttons[i].setAttribute("aria-pressed", on ? "true" : "false");
-		}
+		if (seg) markPressed(seg.querySelectorAll("[data-dw-layout]"), "data-dw-layout", v);
 	}
 	if (seg && layouts) {
 		var segButtons = seg.querySelectorAll("[data-dw-layout]");
@@ -120,12 +135,16 @@
 	applyFilters();
 
 	// Check now: POST, then poll /check and reload once the cycle completes.
-	var checkBtn = document.querySelector("[data-dw-check]");
+	// The header and the dashboard toolbar each carry a button; CSS shows one.
+	var checkBtns = document.querySelectorAll("[data-dw-check]");
+	function disableCheck(v) {
+		for (var i = 0; i < checkBtns.length; i++) checkBtns[i].disabled = v;
+	}
 
 	function setCheckingUI() {
 		checking = true;
 		root.setAttribute("data-checking", "");
-		if (checkBtn) checkBtn.disabled = true;
+		disableCheck(true);
 		// Stale rows belong to an unreachable host: the cycle cannot refresh them,
 		// and their time cell is a last-seen stamp, so leave both alone.
 		var vers = document.querySelectorAll(".dw-row:not(.stale) .dw-ver");
@@ -157,7 +176,7 @@
 	function checkFailedUI() {
 		checking = false;
 		root.removeAttribute("data-checking");
-		if (checkBtn) { checkBtn.disabled = false; }
+		disableCheck(false);
 		var rows = document.querySelectorAll(".dw-row:not(.stale)");
 		for (var i = 0; i < rows.length; i++) {
 			var ver = rows[i].querySelector(".dw-ver.dw-checking");
@@ -199,25 +218,24 @@
 		}
 	}
 
-	if (checkBtn) {
-		checkBtn.addEventListener("click", function () {
-			if (checking) return;
-			checking = true; // block re-entry while the POST is in flight
-			fetch("/check").then(function (r) {
-				return usable(r) ? r.json() : null;
-			}).then(function (pre) {
-				var last = pre ? pre.lastCycle : "";
-				return fetch("/check", { method: "POST" }).then(function (r) {
-					if (!usable(r)) throw new Error("check rejected");
-					setCheckingUI();
-					pollStatus(function (s) { return s.lastCycle !== last; });
-				});
-			}).catch(function () { location.reload(); });
-		});
-		// A page rendered mid-cycle arrives with the busy button; resolve it.
-		if (checkBtn.hasAttribute("data-dw-checking")) {
-			checking = true;
-			pollStatus(function (s) { return !s.running; });
-		}
+	function startCheck() {
+		if (checking) return;
+		checking = true; // block re-entry while the POST is in flight
+		fetch("/check").then(function (r) {
+			return usable(r) ? r.json() : null;
+		}).then(function (pre) {
+			var last = pre ? pre.lastCycle : "";
+			return fetch("/check", { method: "POST" }).then(function (r) {
+				if (!usable(r)) throw new Error("check rejected");
+				setCheckingUI();
+				pollStatus(function (s) { return s.lastCycle !== last; });
+			});
+		}).catch(function () { location.reload(); });
+	}
+	for (var c = 0; c < checkBtns.length; c++) checkBtns[c].addEventListener("click", startCheck);
+	// A page rendered mid-cycle arrives with busy buttons; resolve them with one poll.
+	if (checkBtns.length && checkBtns[0].hasAttribute("data-dw-checking")) {
+		checking = true;
+		pollStatus(function (s) { return !s.running; });
 	}
 })();
