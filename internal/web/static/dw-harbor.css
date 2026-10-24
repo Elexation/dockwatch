@@ -39,6 +39,9 @@ html, body { margin: 0; padding: 0; }
   font-size: var(--fs-base);
   line-height: 1.45;
   min-height: 100vh;
+  /* Phone browsers otherwise enlarge text in any block wider than the screen. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 .dw-root[data-theme="light"] {
   --bg: oklch(0.962 0.008 245);
@@ -152,7 +155,7 @@ html, body { margin: 0; padding: 0; }
 .dw-row.stale:hover { opacity: 1; }
 .dw-host.stale { color: var(--bad); border-color: var(--bad); }
 .dw-cname { font-weight: 600; font-size: var(--fs-md); }
-.dw-cimg { font-size: var(--fs-xs); color: var(--text-3); overflow-wrap: break-word; }
+.dw-cimg { font-size: var(--fs-xs); color: var(--text-3); overflow-wrap: anywhere; }
 
 .dw-ver { font-size: var(--fs-md); }
 .dw-ver .arrow { color: var(--text-3); padding: 0 4px; }
@@ -252,7 +255,8 @@ html, body { margin: 0; padding: 0; }
   .dw-pagehead { padding: 16px 14px 10px; flex-direction: column; align-items: flex-start; gap: 2px; }
   .dw-agents { margin: 4px 14px 20px; grid-template-columns: 1fr; }
   .dw-formpage { margin: 4px 14px 20px; }
-  .dw-row, .dw-row.flat { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 11px var(--row-pad-x); }
+  /* A bare 1fr cannot shrink below its longest unbreakable word and pushes the row past the card. */
+  .dw-row, .dw-row.flat { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 11px var(--row-pad-x); }
   .dw-row.flat .dw-host { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; }
   .dw-row .dw-ver { grid-column: 1 / -1; }
   .dw-cell-health, .dw-cell-time { display: none; }

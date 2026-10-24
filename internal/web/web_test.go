@@ -186,6 +186,39 @@ func TestBuildDashboardJoinsPinnedTag(t *testing.T) {
 	}
 }
 
+func TestShortDigest(t *testing.T) {
+	const pin = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	cases := []struct{ in, want string }{
+		{"cloudflare/cloudflared:2026.10.3@" + pin, "cloudflare/cloudflared:2026.10.3@sha256:0123456789ab"},
+		{"cloudflare/cloudflared@" + pin, "cloudflare/cloudflared@sha256:0123456789ab"},
+		{"nginx:stable", "nginx:stable"},
+		{"registry.lan:5000/app:1.0", "registry.lan:5000/app:1.0"},
+		{"x@sha256:abc", "x@sha256:abc"},
+	}
+	for _, c := range cases {
+		if got := shortDigest(c.in); got != c.want {
+			t.Errorf("shortDigest(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestRenderShortensPinnedDigest(t *testing.T) {
+	const pin = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const image = "cloudflare/cloudflared:2026.10.3@" + pin
+	invs := []inventory.Inventory{{V: 1, Host: "home", Docker: inventory.DockerOK, Containers: []inventory.Container{
+		running("tunnel", image, "cloudflare/cloudflared@"+pin, ""),
+	}}}
+	var buf bytes.Buffer
+	if err := testRenderer().RenderDashboard(&buf, BuildDashboard(invs, nil, DashboardInput{})); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	assertContains(t, "dashboard", out, `title="`+image+`"`, `sha256:<wbr>0123456789ab</div>`)
+	if strings.Count(out, pin) != strings.Count(out, `title="`+image+`"`) {
+		t.Error("full digest rendered outside the tooltip")
+	}
+}
+
 func TestBareNameAuthRendersLocal(t *testing.T) {
 	invs := []inventory.Inventory{{
 		V: 1, Host: "home", Docker: inventory.DockerOK,

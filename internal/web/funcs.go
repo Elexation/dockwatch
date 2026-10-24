@@ -18,10 +18,32 @@ func (r *Renderer) funcMap() template.FuncMap {
 			return "-"
 		},
 		"expiryDate":  expiryDate,
+		"shortDigest": shortDigest,
 		"wbrImageRef": wbrImageRef,
 		"dict":        dict,
 		"plural":      plural,
 	}
+}
+
+// shortDigestLen matches Docker's short IDs.
+const shortDigestLen = 12
+
+// shortDigest trims a pinned digest ("app:1.2@sha256:...") to its first 12 hex
+// characters for display. A ref without a digest is returned unchanged.
+func shortDigest(ref string) string {
+	at := strings.LastIndexByte(ref, '@')
+	if at < 0 {
+		return ref
+	}
+	colon := strings.IndexByte(ref[at:], ':')
+	if colon < 0 {
+		return ref
+	}
+	end := at + colon + 1 + shortDigestLen
+	if end >= len(ref) {
+		return ref
+	}
+	return ref[:end]
 }
 
 // wbrImageRef returns the image ref with a <wbr> after each "/" and ":" so long

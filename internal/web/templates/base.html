@@ -116,11 +116,12 @@
 
 {{define "row" -}}
 {{$r := .R -}}
+{{$img := shortDigest $r.Image -}}
 <div class="dw-row{{if .Flat}} flat{{end}}{{if $r.Stale}} stale{{end}}" data-host="{{$r.Host}}" data-state="{{$r.State}}">
 	{{if .Flat}}<span class="dw-host mono{{if $r.Stale}} stale{{end}}"{{if $r.Stale}} title="Host unreachable"{{end}}>{{$r.Host}}</span>{{end}}
 	<div>
 		<div class="dw-cname">{{$r.Name}}</div>
-		<div class="dw-cimg mono">{{wbrImageRef $r.Image}}</div>
+		<div class="dw-cimg mono"{{if ne $img $r.Image}} title="{{$r.Image}}"{{end}}>{{wbrImageRef $img}}</div>
 	</div>
 	{{template "versioncell" $r}}
 	<span class="dw-cell-health">{{template "healthbadge" $r.Health}}</span>
