@@ -254,8 +254,9 @@ html, body { margin: 0; padding: 0; }
 .dw-pagehead h1 { font-size: var(--fs-2xl); font-weight: 700; margin: 0; }
 .dw-pagehead .sub { color: var(--text-3); font-size: var(--fs-base); }
 
-/* responsive: the app is the viewport, so these track the window width. */
-@media (max-width: 760px) {
+/* responsive: the app is the viewport, so these track the window width.
+   Below 860px the flat table's minimum columns, plus a desktop scrollbar, overflow the card. */
+@media (max-width: 860px) {
   /* Phones are read at arm's length, so the whole type scale steps up. */
   .dw-root {
     --ctl-h: 44px;
