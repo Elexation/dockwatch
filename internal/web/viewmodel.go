@@ -54,7 +54,7 @@ func (s DisplayState) String() string {
 
 // ChromeVM is the shared app-page chrome (header plus notifications notice).
 type ChromeVM struct {
-	Active           string // nav key ("dashboard", "agents", "settings"); drives aria-current
+	Active           string // nav key ("dashboard", "settings"); drives aria-current
 	Theme            string // "light" or "dark"; dark is the default
 	Layout           string // "grouped" or "flat"; dashboard only
 	LastCycle        time.Time
@@ -94,17 +94,28 @@ type GroupVM struct {
 
 // DashboardVM is the full dashboard page model.
 type DashboardVM struct {
-	Chrome   ChromeVM
-	Hosts    []string // host filter options, local first
-	Groups   []GroupVM
-	FlatRows []RowVM
-	Summary  string // "N of M containers · K updates"
-	Empty    bool
-	EmptyMsg string
+	Chrome       ChromeVM
+	Groups       []GroupVM
+	FlatRows     []RowVM
+	Headline     string   // status row heading, naming updates and republished images
+	HeadlineTone string   // "upd", "repub", or "" for the normal text colour
+	Fleet        string   // "N containers on H hosts"
+	Tally        []string // counts of the states the headline does not name, e.g. "25 up to date"
+	Empty        bool
+	EmptyMsg     string
 	// DockerDown lists hosts whose Docker daemon did not answer, in the last
 	// inventory that got through. They have no rows, hence no group or stale
 	// marker, so without a notice they would just vanish.
 	DockerDown []HostNoticeVM
+	// AgentNotices repeats each agent warn flag from Settings, so a wire
+	// version mismatch stays visible without opening that page.
+	AgentNotices []AgentNoticeVM
+}
+
+// AgentNoticeVM is a dashboard notice for one agent warn flag.
+type AgentNoticeVM struct {
+	Agent string
+	Text  string
 }
 
 // HostNoticeVM is a dashboard notice for a host whose containers cannot be listed.
@@ -114,7 +125,7 @@ type HostNoticeVM struct {
 	LastSeen time.Time // that host's last successful poll, when Stale
 }
 
-// AgentCardVM is one agent's card on the agents page.
+// AgentCardVM is one agent's card in the Settings agents section.
 type AgentCardVM struct {
 	Name         string
 	ReachClass   string // "ok", "down", or "nodocker"
@@ -124,19 +135,15 @@ type AgentCardVM struct {
 	Flags        []string // warn-flag texts
 }
 
-// AgentsVM is the full agents page model.
-type AgentsVM struct {
-	Chrome ChromeVM
-	Cards  []AgentCardVM
-	Empty  bool
-}
-
-// SettingsVM is the settings page model; its only section is the password change.
+// SettingsVM is the settings page model. Banner, Done and Fields belong to the
+// password change; the agents section is read-only.
 type SettingsVM struct {
-	Chrome ChromeVM
-	Banner string // generic top-of-section error, never field-specific
-	Done   bool   // success confirmation, rendered on a fresh form
-	Fields []FieldVM
+	Chrome    ChromeVM
+	Banner    string // generic top-of-section error, never field-specific
+	Done      bool   // success confirmation, rendered on a fresh form
+	Fields    []FieldVM
+	LocalName string // the hub's own host, named as the one the agent list omits
+	Agents    []AgentCardVM
 }
 
 // FieldVM is one labeled input on an auth form.

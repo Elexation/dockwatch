@@ -159,8 +159,8 @@ func runHub(cfg *config.Config) {
 	}
 
 	// Config is the source of truth for which agents exist; stored status for a
-	// renamed or removed one would otherwise linger on the agents page and keep
-	// being evaluated for down alerts.
+	// renamed or removed one would otherwise linger in the Settings agent list
+	// and keep being evaluated for down alerts.
 	names := make([]string, 0, len(cfg.Agents))
 	noDownAlert := make(map[string]bool)
 	for _, a := range cfg.Agents {

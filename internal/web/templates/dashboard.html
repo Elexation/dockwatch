@@ -10,10 +10,14 @@
 	{{- end}}
 </div>
 {{end}}
-{{template "toolbar" .}}
-{{if .Empty}}
-{{template "empty" (dict "Big" "No containers found" "Msg" .EmptyMsg)}}
-{{else}}
+{{range .AgentNotices}}
+<div class="dw-notice" role="status">
+	<span class="dw-dot dot" aria-hidden="true"></span>
+	<span><b>Agent {{.Agent}}.</b> {{.Text}}</span>
+</div>
+{{end}}
+{{template "statusrow" .}}
+{{if not .Empty}}
 <div class="dw-layouts" data-layout="{{.Chrome.Layout}}" data-dw-layouts>
 	<div class="dw-groupedwrap">
 		{{range .Groups}}{{template "group" .}}{{end}}
@@ -24,7 +28,6 @@
 		</section>
 	</div>
 </div>
-{{template "empty" (dict "Big" "No containers found" "Msg" "Nothing matches the current filters." "Filter" true)}}
 {{end}}
 {{template "appclose"}}
 {{- end}}

@@ -1,13 +1,12 @@
 {{define "settings" -}}
 {{template "appopen" (dict "Chrome" .Chrome "Title" "Settings")}}
-	<div class="dw-pagehead">
-		<h1>Settings</h1>
-		<span class="sub">admin account, theme and sign out</span>
-	</div>
 	<div class="dw-formpage">
+		<h1>Settings</h1>
 		<section class="dw-authbox" aria-labelledby="set-pw">
-			<h2 id="set-pw">Change password</h2>
-			<p class="dw-sectsub">Signing in elsewhere will need the new password.</p>
+			<div>
+				<h2 id="set-pw">Change password</h2>
+				<p class="dw-sectsub">Changing it signs out every other browser.</p>
+			</div>
 			{{if .Done}}<div class="dw-formok" role="status">Password changed. Other sessions were signed out.</div>{{end}}
 			{{if .Banner}}<div class="dw-formerr" role="alert">{{.Banner}}</div>{{end}}
 			<form class="dw-fields" method="post" action="/settings/password" novalidate>
@@ -15,19 +14,28 @@
 				<button class="dw-btnprimary dw-submit" type="submit">Change password</button>
 			</form>
 		</section>
-		<section class="dw-authbox" aria-labelledby="set-look">
-			<h2 id="set-look">Appearance</h2>
-			<p class="dw-sectsub">Saved in this browser.</p>
-			<div class="dw-setrow">
-				<span id="dw-themelabel">Theme</span>
-				<span class="dw-seg" role="group" aria-labelledby="dw-themelabel">
-					<button type="button" class="{{if ne .Chrome.Theme "light"}}on{{end}}" aria-pressed="{{if ne .Chrome.Theme "light"}}true{{else}}false{{end}}" data-dw-themeset="dark">Dark</button>
-					<button type="button" class="{{if eq .Chrome.Theme "light"}}on{{end}}" aria-pressed="{{if eq .Chrome.Theme "light"}}true{{else}}false{{end}}" data-dw-themeset="light">Light</button>
-				</span>
+		<section class="dw-authbox dw-setcard" aria-labelledby="set-theme">
+			<div>
+				<h2 id="set-theme">Theme</h2>
+				<p class="dw-sectsub">Saved in this browser.</p>
 			</div>
+			<span class="dw-seg" role="group" aria-labelledby="set-theme">
+				<button type="button" class="{{if ne .Chrome.Theme "light"}}on{{end}}" aria-pressed="{{if ne .Chrome.Theme "light"}}true{{else}}false{{end}}" data-dw-themeset="dark">Dark</button>
+				<button type="button" class="{{if eq .Chrome.Theme "light"}}on{{end}}" aria-pressed="{{if eq .Chrome.Theme "light"}}true{{else}}false{{end}}" data-dw-themeset="light">Light</button>
+			</span>
 		</section>
-		<section class="dw-authbox" aria-labelledby="set-session">
-			<h2 id="set-session">Session</h2>
+		<section class="dw-authbox" aria-labelledby="set-agents">
+			<div>
+				<h2 id="set-agents">Agents</h2>
+				<p class="dw-sectsub">Remote hosts this hub polls. {{.LocalName}} runs the hub itself, so it isn't listed. Defined in config.</p>
+			</div>
+			{{range .Agents}}{{template "agentcard" .}}{{else}}<p class="dw-noagents">No agents configured. DockWatch is watching this host only.</p>{{end}}
+		</section>
+		<section class="dw-authbox dw-setcard" aria-labelledby="set-session">
+			<div>
+				<h2 id="set-session">Session</h2>
+				<p class="dw-sectsub">Ends the session in this browser.</p>
+			</div>
 			<form method="post" action="/logout"><button class="dw-btnghost dw-btnline" type="submit">Sign out</button></form>
 		</section>
 	</div>

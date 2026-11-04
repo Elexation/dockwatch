@@ -176,11 +176,21 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	e := passwordErrors[q.Get("err")]
+	agents, err := s.cfg.Store.AllAgents()
+	if err != nil {
+		slog.Error("read agents", "err", err)
+	}
+	docker := make(map[string]string)
+	for _, inv := range s.agentInventories() {
+		docker[inv.Host] = inv.Docker
+	}
 	s.renderSettings(w, web.SettingsVM{
-		Chrome: s.chrome(r, "settings"),
-		Done:   q.Get("changed") == "1",
-		Banner: e.banner,
-		Fields: passwordFields("", e.pwErr, e.confirmErr),
+		Chrome:    s.chrome(r, "settings"),
+		Done:      q.Get("changed") == "1",
+		Banner:    e.banner,
+		Fields:    passwordFields("", e.pwErr, e.confirmErr),
+		LocalName: s.cfg.LocalName,
+		Agents:    web.BuildAgentCards(agents, docker),
 	})
 }
 
@@ -333,6 +343,10 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("read checks", "err", err)
 	}
+	agents, err := s.cfg.Store.AllAgents()
+	if err != nil {
+		slog.Error("read agents", "err", err)
+	}
 	invs := []inventory.Inventory{inv}
 	invs = append(invs, s.agentInventories()...)
 	vm := web.BuildDashboard(invs, checks, web.DashboardInput{
@@ -342,39 +356,19 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		LastCycle:        s.lastCycle(latestCheck(checks)),
 		NotificationsOff: s.cfg.NotificationsOff,
 		Checking:         s.checking(),
-		StaleHosts:       s.staleHosts(),
+		StaleHosts:       staleOf(agents),
+		Agents:           agents,
 	})
 	if err := s.cfg.Renderer.RenderDashboard(w, vm); err != nil {
 		slog.Error("render dashboard", "err", err)
 	}
 }
 
-func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
-	agents, err := s.cfg.Store.AllAgents()
-	if err != nil {
-		slog.Error("read agents", "err", err)
-	}
-	docker := make(map[string]string)
-	for _, inv := range s.agentInventories() {
-		docker[inv.Host] = inv.Docker
-	}
-	vm := web.BuildAgents(agents, web.AgentsInput{
-		Theme:            themeFrom(r),
-		LastCycle:        s.lastCycle(latestPoll(agents)),
-		NotificationsOff: s.cfg.NotificationsOff,
-		Checking:         s.checking(),
-		DockerStatus:     docker,
-	})
-	if err := s.cfg.Renderer.RenderAgents(w, vm); err != nil {
-		slog.Error("render agents", "err", err)
-	}
-}
-
 // --- helpers ---
 
 // chrome builds the shared header model for pages that render no data of their
-// own. active is matched against the nav links and the settings cog, so a value
-// naming none of them simply leaves all three unmarked.
+// own. active is matched against the nav link and the settings cog, so a value
+// naming neither simply leaves both unmarked.
 func (s *Server) chrome(r *http.Request, active string) web.ChromeVM {
 	return web.ChromeVM{
 		Active:           active,
@@ -421,19 +415,9 @@ func (s *Server) cycleDone() time.Time {
 	return s.cfg.LastCycleDone()
 }
 
-// staleHosts maps each unreachable agent to its last successful poll. The
-// poller keeps serving a down agent's last-known inventory, so without this the
-// dashboard would render those containers as if they were just checked.
-func (s *Server) staleHosts() map[string]time.Time {
-	agents, err := s.cfg.Store.AllAgents()
-	if err != nil {
-		slog.Error("read agents", "err", err)
-		return nil
-	}
-	return staleOf(agents)
-}
-
 // staleOf maps each unreachable agent in agents to its last successful poll.
+// The poller keeps serving a down agent's last-known inventory, so without this
+// the dashboard would render those containers as if they were just checked.
 func staleOf(agents []store.AgentStatus) map[string]time.Time {
 	out := make(map[string]time.Time, len(agents))
 	for _, a := range agents {
@@ -513,16 +497,6 @@ func latestCheck(checks []store.CheckResult) time.Time {
 	for _, ch := range checks {
 		if ch.CheckedAt.After(latest) {
 			latest = ch.CheckedAt
-		}
-	}
-	return latest
-}
-
-func latestPoll(agents []store.AgentStatus) time.Time {
-	var latest time.Time
-	for _, a := range agents {
-		if a.LastPoll.After(latest) {
-			latest = a.LastPoll
 		}
 	}
 	return latest

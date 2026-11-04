@@ -33,7 +33,6 @@ func TestWritePreview(t *testing.T) {
 	}
 
 	invs, checks, din := sampleDashboard()
-	agents, ain := sampleAgents()
 	sinvs, schecks, sdin := stressDashboard()
 	cdin := din
 	cdin.Checking = true
@@ -44,7 +43,6 @@ func TestWritePreview(t *testing.T) {
 		{"dashboard", func(b *bytes.Buffer) error { return r.RenderDashboard(b, BuildDashboard(invs, checks, din)) }},
 		{"dashboard-stress", func(b *bytes.Buffer) error { return r.RenderDashboard(b, BuildDashboard(sinvs, schecks, sdin)) }},
 		{"dashboard-checking", func(b *bytes.Buffer) error { return r.RenderDashboard(b, BuildDashboard(invs, checks, cdin)) }},
-		{"agents", func(b *bytes.Buffer) error { return r.RenderAgents(b, BuildAgents(agents, ain)) }},
 		{"setup", func(b *bytes.Buffer) error { return r.RenderSetup(b, setupClean()) }},
 		{"login", func(b *bytes.Buffer) error { return r.RenderLogin(b, loginClean()) }},
 		{"settings", func(b *bytes.Buffer) error { return r.RenderSettings(b, settingsClean()) }},

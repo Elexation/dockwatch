@@ -20,7 +20,7 @@ type AgentStatus struct {
 	WireNotifiedV int `json:"wire_notified_v,omitempty"` // wire version already alerted on (once-per-detection gate)
 
 	CertNotAfter        time.Time `json:"cert_not_after,omitempty"`        // expiry of the cert served on the last OK poll
-	LastRenewalReminder time.Time `json:"last_renewal_reminder,omitempty"` // last staged-bundle alert (renewal push or weekly reminder); non-zero lights the agents-page warn flag
+	LastRenewalReminder time.Time `json:"last_renewal_reminder,omitempty"` // last staged-bundle alert (renewal push or weekly reminder); non-zero lights the agent's warn flag in Settings and on the dashboard
 	ReissuePending      bool      `json:"reissue_pending,omitempty"`       // re-issue alert (new address or CA) not yet delivered
 }
 
@@ -95,8 +95,8 @@ func (s *Store) AllAgents() ([]AgentStatus, error) {
 
 // PruneAgents drops stored statuses for agents no longer in keep and returns
 // the names removed. Status is rebuilt by the next poll, so dropping a
-// renamed or decommissioned agent costs nothing and stops it lingering on the
-// agents page and in the down-alert evaluation.
+// renamed or decommissioned agent costs nothing and stops it lingering in the
+// Settings agent list and in the down-alert evaluation.
 func (s *Store) PruneAgents(keep []string) ([]string, error) {
 	set := make(map[string]bool, len(keep))
 	for _, n := range keep {

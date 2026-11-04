@@ -24,16 +24,10 @@
 
 	var theme = readTheme();
 
-	// The header toggle flips the theme; the Settings page control sets it.
-	var themeBtn = document.querySelector("[data-dw-theme]");
+	// The Settings page control sets the theme.
 	var themeSet = document.querySelectorAll("[data-dw-themeset]");
 	function showTheme() {
 		root.setAttribute("data-theme", theme);
-		if (themeBtn) {
-			var to = "Switch to " + (theme === "light" ? "dark" : "light") + " theme";
-			themeBtn.setAttribute("aria-label", to);
-			themeBtn.title = to;
-		}
 		markPressed(themeSet, "data-dw-themeset", theme);
 	}
 	function setTheme(v) {
@@ -42,11 +36,6 @@
 		showTheme();
 	}
 	showTheme();
-	if (themeBtn) {
-		themeBtn.addEventListener("click", function () {
-			setTheme(theme === "dark" ? "light" : "dark");
-		});
-	}
 	for (var t = 0; t < themeSet.length; t++) {
 		themeSet[t].addEventListener("click", function () {
 			setTheme(this.getAttribute("data-dw-themeset"));
@@ -77,65 +66,9 @@
 		}
 	}
 
-	// Host/status filtering. Grouped and flat subtrees both stay in the DOM,
-	// so rows hide in both and counts read the flat tree only.
-	var statusGroups = {
-		update: { update: true, republished: true },
-		current: { current: true },
-		notcheckable: { local: true, auth: true, rate: true, error: true, pending: true }
-	};
-	var hostSel = document.querySelector("[data-dw-host]");
-	var statusSel = document.querySelector("[data-dw-status]");
-	// The inner node, not .dw-count itself: updateCount overwrites textContent, and
-	// the wrapper also carries the mobile-only cycle stamp as a sibling.
-	var countEl = document.querySelector(".dw-countnum");
-	var noResults = document.querySelector("[data-dw-noresults]");
-	// Seeded from the server's flag so the load-time count keeps its "checking…" tail.
-	var checking = root.hasAttribute("data-checking");
-
-	function rowVisible(row, host, status) {
-		if (host !== "all" && row.getAttribute("data-host") !== host) return false;
-		if (status !== "all" && !statusGroups[status][row.getAttribute("data-state")]) return false;
-		return true;
-	}
-
-	function updateCount() {
-		if (!countEl || !layouts) return;
-		var flat = layouts.querySelectorAll(".dw-flatwrap .dw-row");
-		var visible = 0, updates = 0;
-		for (var i = 0; i < flat.length; i++) {
-			if (!flat[i].hidden) visible++;
-			if (flat[i].getAttribute("data-state") === "update") updates++;
-		}
-		var tail = checking ? "checking…" : updates + (updates === 1 ? " update" : " updates");
-		countEl.textContent = visible + " of " + flat.length + " containers · " + tail;
-	}
-
-	function applyFilters() {
-		if (!layouts) return;
-		var host = hostSel ? hostSel.value : "all";
-		var status = statusSel ? statusSel.value : "all";
-		var rows = layouts.querySelectorAll(".dw-row");
-		for (var i = 0; i < rows.length; i++) {
-			rows[i].hidden = !rowVisible(rows[i], host, status);
-		}
-		var groups = layouts.querySelectorAll(".dw-groupedwrap .dw-group");
-		for (var g = 0; g < groups.length; g++) {
-			groups[g].hidden = groups[g].querySelector(".dw-row:not([hidden])") === null;
-		}
-		var anyVisible = layouts.querySelector(".dw-flatwrap .dw-row:not([hidden])") !== null;
-		layouts.hidden = !anyVisible;
-		if (noResults) noResults.hidden = anyVisible;
-		updateCount();
-	}
-	if (hostSel) hostSel.addEventListener("change", applyFilters);
-	if (statusSel) statusSel.addEventListener("change", applyFilters);
-	// Browsers restore select state across the check-now reload, so re-apply on
-	// load or the controls would show a filter the rows no longer reflect.
-	applyFilters();
-
 	// Check now: POST, then poll /check and reload once the cycle completes.
-	// The header and the dashboard toolbar each carry a button; CSS shows one.
+	// The header and the dashboard status row each carry a button; CSS shows one.
+	var checking = false;
 	var checkBtns = document.querySelectorAll("[data-dw-check]");
 	function disableCheck(v) {
 		for (var i = 0; i < checkBtns.length; i++) checkBtns[i].disabled = v;
@@ -158,7 +91,6 @@
 		for (var j = 0; j < times.length; j++) times[j].textContent = "…";
 		var hups = document.querySelectorAll(".hup");
 		for (var k = 0; k < hups.length; k++) hups[k].hidden = true;
-		updateCount();
 	}
 
 	// usable is the shared "this response carries data" test; a redirect means the
@@ -188,7 +120,6 @@
 		}
 		var hups = document.querySelectorAll(".hup");
 		for (var k = 0; k < hups.length; k++) hups[k].hidden = false;
-		updateCount();
 	}
 
 	// pollStatus reloads once done(status) holds; a redirect means the session is

@@ -167,7 +167,7 @@ func (n *Notifier) agentTransitions(ctx context.Context, a store.AgentStatus, no
 			}
 		case ok && !a.LastRenewalReminder.IsZero():
 			// Agent now serves the staged cert: clear the gate, or the reminder
-			// timestamp keeps the agents-page warn flag lit forever. An unreadable
+			// timestamp keeps the agent's warn flag lit forever. An unreadable
 			// staged bundle proves nothing, so it leaves the gate alone.
 			a.LastRenewalReminder = time.Time{}
 			changed = true

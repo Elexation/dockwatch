@@ -38,31 +38,21 @@
 </html>
 {{- end}}
 
-{{define "empty" -}}
-<div class="dw-empty"{{if .Filter}} data-dw-noresults hidden{{end}}>
-	<div class="big">{{.Big}}</div>
-	<div>{{.Msg}}</div>
-</div>
-{{- end}}
-
 {{define "header" -}}
 <header class="dw-top">
 	<a class="dw-mark" href="/"><span class="dw-glyph" aria-hidden="true"></span>DockWatch</a>
 	<nav class="dw-nav" aria-label="Main">
 		<a href="/"{{if eq .Active "dashboard"}} aria-current="page"{{end}}>Dashboard</a>
-		<a href="/agents"{{if eq .Active "agents"}} aria-current="page"{{end}}>Agents</a>
 	</nav>
 	<div class="dw-top-right">
 		<span class="dw-cycle">last cycle: <span class="idle">{{reltimeOrDash .LastCycle}}</span><span class="busy">running…</span></span>
 		<a class="dw-btnghost dw-cog" href="/settings" aria-label="Settings" title="Settings"{{if eq .Active "settings"}} aria-current="page"{{end}}>{{template "coglyph"}}</a>
-		<button class="dw-btnghost dw-themectl" type="button" data-dw-theme aria-label="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme" title="Switch to {{if eq .Theme "light"}}dark{{else}}light{{end}} theme"><span class="dw-themeglyph" aria-hidden="true"></span></button>
 		{{template "checkbtn" (dict "Checking" .Checking "Mobile" false)}}
-		<form class="dw-logout" method="post" action="/logout"><button class="dw-btnghost dw-signout" type="submit">Sign out</button></form>
 	</div>
 </header>
 {{- end}}
 
-{{/* The header copy serves desktop and the toolbar copy serves phones; app.js drives both as one. */}}
+{{/* The header copy serves desktop and the status row copy serves phones; app.js drives both as one. */}}
 {{define "checkbtn" -}}
 <button class="dw-btnprimary dw-check{{if .Mobile}} dw-checkmob{{end}}" type="button" data-dw-check{{if .Checking}} disabled data-dw-checking{{end}}><span class="idle">Check now</span><span class="busy"><span class="dw-spin" aria-hidden="true"></span>Checking…</span></button>
 {{- end}}
@@ -86,40 +76,25 @@
 </div>
 {{- end}}
 
-{{define "toolbar" -}}
-<div class="dw-toolbar">
-	<span class="dw-field">
-		<label for="dw-fhost">Host</label>
-		<select class="dw-select" id="dw-fhost" data-dw-host>
-			<option value="all">All hosts</option>
-			{{range .Hosts}}<option value="{{.}}">{{.}}</option>{{end}}
-		</select>
-	</span>
-	<span class="dw-field">
-		<label for="dw-fstatus">Status</label>
-		<select class="dw-select" id="dw-fstatus" data-dw-status>
-			<option value="all">All statuses</option>
-			<option value="update">Update available</option>
-			<option value="current">Current</option>
-			<option value="notcheckable">Not checkable</option>
-		</select>
-	</span>
-	<span class="dw-field" role="group" aria-label="List view">
-		<label id="dw-viewlabel">View</label>
-		<span class="dw-seg" aria-labelledby="dw-viewlabel" data-dw-seg>
+{{/* Both headlines render and CSS shows one, so a failed cycle restores the idle text. */}}
+{{define "statusrow" -}}
+<div class="dw-status">
+	<div>
+		<h1 class="dw-headline"><span class="idle{{with .HeadlineTone}} {{.}}{{end}}">{{.Headline}}</span><span class="busy">Checking…</span></h1>
+		<p class="dw-sum">{{if .Empty}}{{.EmptyMsg}}{{else}}{{.Fleet}}<span class="dw-tally">{{range .Tally}} · {{.}}{{end}}</span>{{end}}<span class="dw-cyclemob"> · checked {{reltimeOrDash .Chrome.LastCycle}}</span></p>
+	</div>
+	<div class="dw-statusctl">
+		{{if not .Empty}}<span class="dw-seg" role="group" aria-label="List view" data-dw-seg>
 			<button type="button" class="{{if ne .Chrome.Layout "flat"}}on{{end}}" aria-pressed="{{if ne .Chrome.Layout "flat"}}true{{else}}false{{end}}" data-dw-layout="grouped">{{template "groupedglyph"}}<span class="dw-seglbl">grouped</span></button>
 			<button type="button" class="{{if eq .Chrome.Layout "flat"}}on{{end}}" aria-pressed="{{if eq .Chrome.Layout "flat"}}true{{else}}false{{end}}" data-dw-layout="flat">{{template "flatglyph"}}<span class="dw-seglbl">flat</span></button>
-		</span>
-	</span>
-	<div class="dw-countrow">
-		{{if not .Empty}}<span class="dw-count"><span class="dw-countnum">{{.Summary}}</span><span class="dw-cyclemob"> · checked {{reltimeOrDash .Chrome.LastCycle}}</span></span>{{end}}
+		</span>{{end}}
 		{{template "checkbtn" (dict "Checking" .Chrome.Checking "Mobile" true)}}
 	</div>
 </div>
 {{- end}}
 
 {{define "group" -}}
-<section class="dw-group" aria-label="Host {{.Host}}{{if .Stale}}, unreachable{{end}}" data-host="{{.Host}}">
+<section class="dw-group" aria-label="Host {{.Host}}{{if .Stale}}, unreachable{{end}}">
 	<div class="dw-ghead">
 		<span class="hname">{{.Host}}</span>
 		<span class="hmeta">{{.Count}} {{plural .Count "container" "containers"}}</span>
@@ -134,15 +109,14 @@
 {{$r := .R -}}
 {{$img := shortDigest $r.Image -}}
 {{$alert := or (eq $r.Health "unhealthy") (eq $r.Health "starting") -}}
-<div class="dw-row{{if .Flat}} flat{{end}}{{if $r.Stale}} stale{{end}}" data-host="{{$r.Host}}" data-state="{{$r.State}}">
+<div class="dw-row{{if .Flat}} flat{{end}}{{if $r.Stale}} stale{{end}}" data-state="{{$r.State}}">
 	{{if .Flat}}<span class="dw-host mono{{if $r.Stale}} stale{{end}}"{{if $r.Stale}} title="Host unreachable"{{end}}>{{$r.Host}}</span>{{end}}
 	<div class="dw-cmain">
-		<div class="dw-cname">{{$r.Name}}</div>
+		<div class="dw-cname">{{$r.Name}}{{if $alert}} {{template "healthword" $r.Health}}{{end}}</div>
 		<div class="dw-cimg mono"{{if ne $img $r.Image}} title="{{$r.Image}}"{{end}}>{{wbrImageRef $img}}</div>
 	</div>
-	{{if or $alert (eq $r.Health "healthy")}}<span class="dw-dot dw-mdot {{$r.Health}}" title="{{$r.Health}}"><span class="dw-vh">{{$r.Health}}</span></span>{{end}}
+	{{template "healthdot" $r.Health}}
 	{{template "versioncell" $r}}
-	<span class="dw-cell-health">{{if $alert}}{{template "healthword" $r.Health}}{{end}}</span>
 	<span class="dw-time dw-cell-time">{{template "rowtime" $r}}</span>
 	{{if or $alert $r.Stale}}<div class="dw-mobilefoot">
 		{{if $alert}}{{template "healthword" $r.Health}}{{end}}
@@ -174,6 +148,15 @@ checked: refs shared with a live host would otherwise read "just now" here. */}}
 <span class="dw-ver dw-mut"{{with .Err}} title="{{.}}"{{end}}>check failed</span>
 {{- else -}}
 <span class="dw-ver dw-mut">not checked yet</span>
+{{- end}}
+{{- end}}
+
+{{/* Missing or "none" health means no healthcheck: hollow ring. */}}
+{{define "healthdot" -}}
+{{if or (eq . "healthy") (eq . "unhealthy") (eq . "starting") -}}
+<span class="dw-dot dw-mdot {{.}}" title="{{.}}"><span class="dw-vh">{{.}}</span></span>
+{{- else -}}
+<span class="dw-dot dw-mdot none" title="no healthcheck"><span class="dw-vh">no healthcheck</span></span>
 {{- end}}
 {{- end}}
 

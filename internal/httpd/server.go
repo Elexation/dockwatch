@@ -93,7 +93,6 @@ func (s *Server) routes() {
 	mux := http.NewServeMux()
 	// Session-gated pages and the check-now endpoints.
 	mux.HandleFunc("GET /{$}", s.requireSession(s.dashboard))
-	mux.HandleFunc("GET /agents", s.requireSession(s.agents))
 	mux.HandleFunc("POST /check", s.requireSession(s.checkNow))
 	mux.HandleFunc("GET /check", s.requireSession(s.checkStatus))
 	mux.HandleFunc("GET /settings", s.requireSession(s.settingsPage))

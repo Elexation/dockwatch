@@ -513,7 +513,7 @@ func TestCertReminderGateClearsOnInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !a.LastRenewalReminder.IsZero() {
-		t.Errorf("LastRenewalReminder = %v, want cleared; it drives the agents-page warn flag, which would otherwise stay lit forever", a.LastRenewalReminder)
+		t.Errorf("LastRenewalReminder = %v, want cleared; it drives the agent warn flag, which would otherwise stay lit forever", a.LastRenewalReminder)
 	}
 }
 

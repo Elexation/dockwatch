@@ -22,15 +22,7 @@ type DashboardInput struct {
 	// containers still render, from the poller's last-known inventory, so
 	// presence here is what tells a reader those rows are a past snapshot.
 	StaleHosts map[string]time.Time
-}
-
-// AgentsInput carries the page-level inputs for the agents page.
-type AgentsInput struct {
-	Theme            string    // "light" or "dark"; dark is the default
-	LastCycle        time.Time // last completed check cycle
-	NotificationsOff bool      // DW_NTFY_TOPIC unset
-	Checking         bool
-	DockerStatus     map[string]string // agent name -> inventory.DockerOK or DockerUnavailable
+	Agents     []store.AgentStatus // stored agent statuses; their warn flags become notices
 }
 
 // BuildDashboard maps inventories and checks into the dashboard model, mirroring
@@ -91,15 +83,8 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 		return strings.ToLower(rows[i].Name) < strings.ToLower(rows[j].Name)
 	})
 
-	hosts := orderHosts(order, in.LocalName)
 	var groups []GroupVM
-	updates := 0
-	for _, r := range rows {
-		if r.rank == StateUpdate {
-			updates++
-		}
-	}
-	for _, h := range hosts {
+	for _, h := range orderHosts(order, in.LocalName) {
 		var hr []RowVM
 		hup := 0
 		for _, r := range rows {
@@ -127,71 +112,114 @@ func BuildDashboard(invs []inventory.Inventory, checks []store.CheckResult, in D
 			NotificationsOff: in.NotificationsOff,
 			Checking:         in.Checking,
 		},
-		Hosts:      hosts,
 		Groups:     groups,
 		FlatRows:   rows,
 		DockerDown: dockerDown,
 	}
+	for _, a := range in.Agents {
+		for _, f := range agentFlags(a) {
+			vm.AgentNotices = append(vm.AgentNotices, AgentNoticeVM{Agent: a.Name, Text: f})
+		}
+	}
 	if len(rows) == 0 {
 		vm.Empty = true
+		vm.Headline = "No containers found"
 		vm.EmptyMsg = "Nothing is running yet on the configured hosts."
 		if len(dockerDown) > 0 {
 			vm.EmptyMsg = "No containers could be listed while Docker is unavailable."
 		}
 		return vm
 	}
-	tail := fmt.Sprintf("%d %s", updates, plural(updates, "update", "updates"))
-	if in.Checking {
-		tail = "checking…" // matches the tail app.js swaps in mid-cycle
+	counts := make(map[DisplayState]int)
+	for _, r := range rows {
+		counts[r.rank]++
 	}
-	vm.Summary = fmt.Sprintf("%d of %d containers · %s", len(rows), len(rows), tail)
+	vm.Headline, vm.HeadlineTone = headline(counts)
+	vm.Fleet = fmt.Sprintf("%d %s on %d %s",
+		len(rows), plural(len(rows), "container", "containers"),
+		len(groups), plural(len(groups), "host", "hosts"))
+	for _, t := range tallyStates {
+		if n := counts[t.state]; n > 0 {
+			vm.Tally = append(vm.Tally, fmt.Sprintf("%d %s", n, plural(n, t.one, t.many)))
+		}
+	}
 	return vm
 }
 
-// BuildAgents maps stored agent statuses into the agents page model; reachability
-// resolves unreachable over Docker-unavailable over reachable. The Docker status
-// comes from the last inventory that got through, so it says nothing about an
-// agent that is down now.
-func BuildAgents(agents []store.AgentStatus, in AgentsInput) AgentsVM {
-	vm := AgentsVM{
-		Chrome: ChromeVM{
-			Active:           "agents",
-			Theme:            in.Theme,
-			LastCycle:        in.LastCycle,
-			NotificationsOff: in.NotificationsOff,
-			Checking:         in.Checking,
-		},
-		Empty: len(agents) == 0,
+// headline names the dashboard's findings, newer tags before republished images.
+// With neither, it claims everything is current only if no check failed or is
+// still pending, since those prove nothing about the image.
+func headline(n map[DisplayState]int) (text, tone string) {
+	up, rep := n[StateUpdate], n[StateRepublished]
+	switch {
+	case up > 0 && rep > 0:
+		return fmt.Sprintf("%d %s, %d republished", up, plural(up, "update", "updates"), rep), "upd"
+	case up > 0:
+		return fmt.Sprintf("%d %s available", up, plural(up, "update", "updates")), "upd"
+	case rep > 0:
+		return fmt.Sprintf("%d republished %s", rep, plural(rep, "image", "images")), "repub"
+	case n[StateRate]+n[StateError]+n[StatePending] > 0:
+		return "No updates found", ""
 	}
+	return "Everything checkable is up to date", ""
+}
+
+// tallyStates are the states the summary line counts, in display order; the
+// headline already names updates and republished images.
+var tallyStates = []struct {
+	state     DisplayState
+	one, many string
+}{
+	{StateCurrent, "up to date", "up to date"},
+	{StateLocal, "local, not checkable", "local, not checkable"},
+	{StateAuth, "auth required", "auth required"},
+	{StateRate, "check delayed", "checks delayed"},
+	{StateError, "check failed", "checks failed"},
+	{StatePending, "not checked yet", "not checked yet"},
+}
+
+// BuildAgentCards maps stored agent statuses into the Settings agent cards;
+// reachability resolves unreachable over Docker-unavailable over reachable.
+// docker maps agent names to the Docker status of the last inventory that got
+// through, so it says nothing about an agent that is down now.
+func BuildAgentCards(agents []store.AgentStatus, docker map[string]string) []AgentCardVM {
+	var cards []AgentCardVM
 	for _, a := range agents {
 		card := AgentCardVM{
 			Name:         a.Name,
 			LastSuccess:  a.LastSuccess,
 			CertNotAfter: a.CertNotAfter,
+			Flags:        agentFlags(a),
 		}
 		switch {
 		case !a.LastOK:
 			card.ReachClass, card.ReachLabel = "down", "unreachable"
-		case in.DockerStatus[a.Name] == inventory.DockerUnavailable:
+		case docker[a.Name] == inventory.DockerUnavailable:
 			card.ReachClass, card.ReachLabel = "nodocker", "Docker unavailable"
 		default:
 			card.ReachClass, card.ReachLabel = "ok", "reachable"
 		}
-		switch {
-		case a.LastWireV > inventory.WireVersion:
-			card.Flags = append(card.Flags,
-				fmt.Sprintf("Update hub: agent is newer (agent v%d, hub v%d).", a.LastWireV, inventory.WireVersion))
-		case a.LastWireV != 0 && a.LastWireV < inventory.WireVersion:
-			card.Flags = append(card.Flags,
-				fmt.Sprintf("Update agent: agent is older (agent v%d, hub v%d).", a.LastWireV, inventory.WireVersion))
-		}
-		if !a.LastRenewalReminder.IsZero() {
-			card.Flags = append(card.Flags,
-				"Renewed bundle not yet installed. Agent still serving the previous certificate.")
-		}
-		vm.Cards = append(vm.Cards, card)
+		cards = append(cards, card)
 	}
-	return vm
+	return cards
+}
+
+// agentFlags returns the warn-flag texts for one agent; nil if none apply.
+func agentFlags(a store.AgentStatus) []string {
+	var flags []string
+	switch {
+	case a.LastWireV > inventory.WireVersion:
+		flags = append(flags,
+			fmt.Sprintf("Update hub: agent is newer (agent v%d, hub v%d).", a.LastWireV, inventory.WireVersion))
+	case a.LastWireV != 0 && a.LastWireV < inventory.WireVersion:
+		flags = append(flags,
+			fmt.Sprintf("Update agent: agent is older (agent v%d, hub v%d).", a.LastWireV, inventory.WireVersion))
+	}
+	if !a.LastRenewalReminder.IsZero() {
+		flags = append(flags,
+			"Renewed bundle not yet installed. Agent still serving the previous certificate.")
+	}
+	return flags
 }
 
 // orderHosts returns the seen hosts with the local host first, the rest in first-seen order.

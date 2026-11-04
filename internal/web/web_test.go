@@ -78,9 +78,15 @@ func TestBuildDashboardGroupsAndSort(t *testing.T) {
 	if got := hostNames(vm.Groups); !equal(got, wantHosts) {
 		t.Errorf("group order: got %v, want %v", got, wantHosts)
 	}
-	wantSummary := "13 of 13 containers " + string(rune(0x00b7)) + " 3 updates"
-	if vm.Summary != wantSummary {
-		t.Errorf("summary: got %q, want %q", vm.Summary, wantSummary)
+	if vm.Headline != "3 updates, 2 republished" || vm.HeadlineTone != "upd" {
+		t.Errorf("headline: got %q (tone %q), want %q (tone upd)", vm.Headline, vm.HeadlineTone, "3 updates, 2 republished")
+	}
+	if vm.Fleet != "13 containers on 3 hosts" {
+		t.Errorf("fleet: got %q", vm.Fleet)
+	}
+	wantTally := []string{"4 up to date", "1 local, not checkable", "1 auth required", "1 check delayed", "1 not checked yet"}
+	if !equal(vm.Tally, wantTally) {
+		t.Errorf("tally: got %q, want %q", vm.Tally, wantTally)
 	}
 
 	home := vm.Groups[0]
@@ -131,9 +137,8 @@ func TestBuildDashboardStress(t *testing.T) {
 	if got := len(vm.FlatRows); got != 55 {
 		t.Errorf("stress rows = %d, want 55", got)
 	}
-	wantSummary := "55 of 55 containers " + string(rune(0x00b7)) + " 14 updates"
-	if vm.Summary != wantSummary {
-		t.Errorf("summary: got %q, want %q", vm.Summary, wantSummary)
+	if vm.Headline != "14 updates, 6 republished" {
+		t.Errorf("headline: got %q, want %q", vm.Headline, "14 updates, 6 republished")
 	}
 	wg := findRow(vm.FlatRows, "wg-easy")
 	if wg == nil || wg.State != "republished" {
@@ -149,6 +154,47 @@ func TestBuildDashboardStress(t *testing.T) {
 	if sc == nil || !sc.RepublishedEstimated {
 		t.Fatalf("scrutiny should carry an estimated republish date, got %+v", sc)
 	}
+}
+
+func TestHeadline(t *testing.T) {
+	cases := []struct {
+		name string
+		n    map[DisplayState]int
+		text string
+		tone string
+	}{
+		{"both", map[DisplayState]int{StateUpdate: 1, StateRepublished: 1, StateCurrent: 5}, "1 update, 1 republished", "upd"},
+		{"both-plural", map[DisplayState]int{StateUpdate: 2, StateRepublished: 3}, "2 updates, 3 republished", "upd"},
+		{"updates", map[DisplayState]int{StateUpdate: 1, StateError: 2}, "1 update available", "upd"},
+		{"updates-plural", map[DisplayState]int{StateUpdate: 4}, "4 updates available", "upd"},
+		{"republished", map[DisplayState]int{StateRepublished: 1, StateCurrent: 3}, "1 republished image", "repub"},
+		{"republished-plural", map[DisplayState]int{StateRepublished: 2}, "2 republished images", "repub"},
+		{"all-clear", map[DisplayState]int{StateCurrent: 25, StateLocal: 10, StateAuth: 1}, "Everything checkable is up to date", ""},
+		{"rate-unproven", map[DisplayState]int{StateCurrent: 3, StateRate: 1}, "No updates found", ""},
+		{"error-unproven", map[DisplayState]int{StateCurrent: 3, StateError: 1}, "No updates found", ""},
+		{"pending-unproven", map[DisplayState]int{StatePending: 2}, "No updates found", ""},
+	}
+	for _, tc := range cases {
+		text, tone := headline(tc.n)
+		if text != tc.text || tone != tc.tone {
+			t.Errorf("%s: got %q (tone %q), want %q (tone %q)", tc.name, text, tone, tc.text, tc.tone)
+		}
+	}
+}
+
+func TestRenderHeadline(t *testing.T) {
+	invs := []inventory.Inventory{{V: 1, Host: "home", Docker: inventory.DockerOK, Containers: []inventory.Container{
+		running("app", "team/app:stable", "team/app@sha256:old", ""),
+		running("db", "team/db:1.0", "team/db@sha256:d1", "healthy"),
+	}}}
+	checks := []store.CheckResult{digest("team/app:stable", "sha256:new"), semverCurrent("team/db:1.0", "1.0")}
+	var buf bytes.Buffer
+	if err := testRenderer().RenderDashboard(&buf, BuildDashboard(invs, checks, DashboardInput{LastCycle: ago(time.Minute)})); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	assertContains(t, "headline", buf.String(),
+		`<h1 class="dw-headline"><span class="idle repub">1 republished image</span><span class="busy">Checking…</span></h1>`,
+		`<p class="dw-sum">2 containers on 1 host<span class="dw-tally"> · 1 up to date</span><span class="dw-cyclemob"> · checked 1m ago</span></p>`)
 }
 
 func TestRepublishedSplit(t *testing.T) {
@@ -230,14 +276,16 @@ func TestRenderRowParts(t *testing.T) {
 	assertContains(t, "dashboard", out,
 		`class="dw-dot dw-mdot healthy" title="healthy"><span class="dw-vh">healthy</span>`,
 		`class="dw-dot dw-mdot unhealthy"`,
-		`<span class="dw-cell-health"><span class="dw-health unhealthy" aria-hidden="true">unhealthy</span></span>`,
-		`<span class="dw-cell-health"></span>`,
+		`<div class="dw-cname">pihole <span class="dw-health unhealthy" aria-hidden="true">unhealthy</span></div>`,
+		`<div class="dw-cname">my-dashboard <span class="dw-health starting" aria-hidden="true">starting</span></div>`,
+		`<div class="dw-cname">backups</div>`,
+		`class="dw-dot dw-mdot none" title="no healthcheck"><span class="dw-vh">no healthcheck</span>`,
 		`class="dw-btnprimary dw-check dw-checkmob"`)
-	if strings.Contains(out, "No health check configured") {
-		t.Error("health cell still renders the placeholder dash")
+	if strings.Contains(out, "dw-cell-health") {
+		t.Error("removed health column still renders")
 	}
 	if n := strings.Count(out, "data-dw-check"); n != 2 {
-		t.Errorf("dashboard has %d check buttons, want 2 (header and mobile toolbar)", n)
+		t.Errorf("dashboard has %d check buttons, want 2 (header and mobile status row)", n)
 	}
 
 	// A healthy row on a live host has nothing for the mobile foot line.
@@ -253,20 +301,43 @@ func TestRenderRowParts(t *testing.T) {
 	}
 }
 
-func TestRenderSettingsAppearance(t *testing.T) {
+func TestRenderSettings(t *testing.T) {
 	var buf bytes.Buffer
 	if err := testRenderer().RenderSettings(&buf, settingsClean()); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
 	assertContains(t, "settings", out,
+		"<h1>Settings</h1>",
+		"Changing it signs out every other browser.",
 		`class="on" aria-pressed="true" data-dw-themeset="dark"`,
 		`class="" aria-pressed="false" data-dw-themeset="light"`,
+		"Remote hosts this hub polls. home runs the hub itself, so it isn't listed. Defined in config.",
+		"reachable", "unreachable", "Docker unavailable",
+		"expires 2026-08-19", "Last successful poll",
+		"Update hub: agent is newer (agent v2, hub v1).",
+		"Renewed bundle not yet installed. Agent still serving the previous certificate.",
+		"Ends the session in this browser.",
 		`<button class="dw-btnghost dw-btnline" type="submit">Sign out</button>`)
-	if n := strings.Count(out, `action="/logout"`); n != 2 {
-		t.Errorf("settings has %d sign-out forms, want 2 (header and page)", n)
+	if n := strings.Count(out, `action="/logout"`); n != 1 {
+		t.Errorf("settings has %d sign-out forms, want 1 (the header no longer carries one)", n)
+	}
+	if strings.Contains(out, "No agents configured") {
+		t.Error("settings with agents rendered the empty state")
 	}
 	assertNoBannedGlyph(t, "settings", out)
+}
+
+func TestRenderSettingsNoAgents(t *testing.T) {
+	vm := settingsClean()
+	vm.Agents = nil
+	var buf bytes.Buffer
+	if err := testRenderer().RenderSettings(&buf, vm); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	assertContains(t, "settings without agents", buf.String(),
+		"No agents configured. DockWatch is watching this host only.")
+	assertNoBannedGlyph(t, "settings without agents", buf.String())
 }
 
 func TestBareNameAuthRendersLocal(t *testing.T) {
@@ -292,14 +363,14 @@ func TestBareNameAuthRendersLocal(t *testing.T) {
 	}
 }
 
-func TestBuildAgents(t *testing.T) {
-	agents, in := sampleAgents()
-	vm := BuildAgents(agents, in)
-	if vm.Empty {
-		t.Fatal("agents unexpectedly empty")
+func TestBuildAgentCards(t *testing.T) {
+	agents, docker := sampleAgents()
+	cards := BuildAgentCards(agents, docker)
+	if len(cards) != len(agents) {
+		t.Fatalf("got %d cards, want %d", len(cards), len(agents))
 	}
 	byName := map[string]AgentCardVM{}
-	for _, c := range vm.Cards {
+	for _, c := range cards {
 		byName[c.Name] = c
 	}
 	if byName["server"].ReachClass != "ok" {
@@ -322,19 +393,19 @@ func TestBuildAgents(t *testing.T) {
 	}
 }
 
-func TestBuildAgentsDownOutranksStaleDockerStatus(t *testing.T) {
+func TestBuildAgentCardsDownOutranksStaleDockerStatus(t *testing.T) {
 	// The Docker status is from the last inventory that got through, before the host went down.
-	vm := BuildAgents([]store.AgentStatus{{Name: "nas", LastOK: false}},
-		AgentsInput{DockerStatus: map[string]string{"nas": inventory.DockerUnavailable}})
-	if got := vm.Cards[0].ReachClass; got != "down" {
+	cards := BuildAgentCards([]store.AgentStatus{{Name: "nas", LastOK: false}},
+		map[string]string{"nas": inventory.DockerUnavailable})
+	if got := cards[0].ReachClass; got != "down" {
 		t.Errorf("reach = %q, want down", got)
 	}
 }
 
-func TestBuildAgentsFlagsOlderAgent(t *testing.T) {
-	vm := BuildAgents([]store.AgentStatus{{Name: "old", LastOK: true, LastWireV: inventory.WireVersion - 1}}, AgentsInput{})
+func TestBuildAgentCardsFlagsOlderAgent(t *testing.T) {
+	cards := BuildAgentCards([]store.AgentStatus{{Name: "old", LastOK: true, LastWireV: inventory.WireVersion - 1}}, nil)
 	older := inventory.WireVersion - 1
-	flags := vm.Cards[0].Flags
+	flags := cards[0].Flags
 	if older > 0 && (len(flags) != 1 || !strings.Contains(flags[0], "agent is older")) {
 		t.Errorf("flags = %v, want the older-agent flag", flags)
 	}
@@ -378,11 +449,27 @@ func TestRenderCheckFailedCell(t *testing.T) {
 	assertContains(t, "dashboard", buf.String(), `data-state="error"`, `title="invalid dw.tags regex">check failed`)
 }
 
-func TestBuildAgentsEmpty(t *testing.T) {
-	vm := BuildAgents(nil, AgentsInput{})
-	if !vm.Empty {
-		t.Error("nil agents should be empty")
+func TestBuildDashboardAgentNotices(t *testing.T) {
+	invs, checks, in := sampleDashboard()
+	vm := BuildDashboard(invs, checks, in)
+	want := []AgentNoticeVM{
+		{Agent: "server", Text: "Update hub: agent is newer (agent v2, hub v1)."},
+		{Agent: "backup", Text: "Renewed bundle not yet installed. Agent still serving the previous certificate."},
 	}
+	if len(vm.AgentNotices) != len(want) || vm.AgentNotices[0] != want[0] || vm.AgentNotices[1] != want[1] {
+		t.Errorf("AgentNotices = %+v, want %+v", vm.AgentNotices, want)
+	}
+	// Notices come from agent state, not rows, so an empty fleet keeps them.
+	if got := BuildDashboard(nil, nil, in); len(got.AgentNotices) != len(want) {
+		t.Errorf("empty dashboard AgentNotices = %+v, want %d", got.AgentNotices, len(want))
+	}
+	var buf bytes.Buffer
+	if err := testRenderer().RenderDashboard(&buf, vm); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	assertContains(t, "dashboard", buf.String(),
+		"<b>Agent server.</b> Update hub: agent is newer (agent v2, hub v1).",
+		"<b>Agent backup.</b> Renewed bundle not yet installed.")
 }
 
 func TestRenderDashboard(t *testing.T) {
@@ -398,11 +485,18 @@ func TestRenderDashboard(t *testing.T) {
 		"republished · detected 1d ago",
 		"up to date", "local, not checkable", "auth required, not checkable",
 		"check delayed (rate limited)", "not checked yet",
-		"13 of 13 containers",
-		`data-theme="dark"`, `aria-label="Switch to light theme"`, "dw-themeglyph",
+		`<span class="idle upd">3 updates, 2 republished</span>`,
+		"13 containers on 3 hosts",
+		`data-theme="dark"`,
 		"Notifications disabled.", "<wbr>")
 	if strings.Contains(out, "ignored:1.0") || strings.Contains(out, "stopped:1.0") {
 		t.Error("watch-gated container leaked into render")
+	}
+	// Theme and Sign out live on Settings now, and the Agents page is gone.
+	for _, gone := range []string{"data-dw-theme ", `action="/logout"`, `href="/agents"`} {
+		if strings.Contains(out, gone) {
+			t.Errorf("dashboard header still renders %q", gone)
+		}
 	}
 	if strings.Contains(out, "data-checking") {
 		t.Error("idle dashboard stamped the busy-swap attribute")
@@ -420,7 +514,7 @@ func TestRenderDashboardChecking(t *testing.T) {
 	}
 	out := buf.String()
 	assertContains(t, "checking dashboard", out,
-		"data-checking", "running…", "· checking…", "Checking…", "dw-spin", "data-dw-checking", " disabled")
+		"data-checking", "running…", `<span class="busy">Checking…</span></h1>`, "dw-spin", "data-dw-checking", " disabled")
 	assertNoBannedGlyph(t, "checking dashboard", out)
 }
 
@@ -447,7 +541,7 @@ func TestRenderDashboardStaleHost(t *testing.T) {
 	assertNoBannedGlyph(t, "stale host", out)
 }
 
-func TestRenderDashboardFilterHooks(t *testing.T) {
+func TestRenderDashboardStateHooks(t *testing.T) {
 	r := testRenderer()
 	invs, checks, in := sampleDashboard()
 	var buf bytes.Buffer
@@ -455,9 +549,13 @@ func TestRenderDashboardFilterHooks(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	assertContains(t, "filter hooks", out,
-		`data-state="update"`, `data-state="republished"`, `data-host="home"`,
-		"data-dw-noresults", "Nothing matches the current filters.")
+	assertContains(t, "state hooks", out,
+		`data-state="update"`, `data-state="republished"`, `role="group" aria-label="List view" data-dw-seg`)
+	for _, gone := range []string{"data-dw-host", "data-dw-status", "data-dw-noresults", "dw-select"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("removed filter control still renders %q", gone)
+		}
+	}
 	if strings.Contains(out, "data-dw-checking") {
 		t.Error("idle dashboard rendered the checking button state")
 	}
@@ -469,37 +567,14 @@ func TestRenderDashboardEmpty(t *testing.T) {
 	if err := r.RenderDashboard(&buf, BuildDashboard(nil, nil, DashboardInput{Theme: "dark", Layout: "grouped"})); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	assertContains(t, "empty dashboard", buf.String(),
-		"No containers found", "Nothing is running yet on the configured hosts.")
-	assertNoBannedGlyph(t, "empty dashboard", buf.String())
-}
-
-func TestRenderAgents(t *testing.T) {
-	r := testRenderer()
-	agents, in := sampleAgents()
-	var buf bytes.Buffer
-	if err := r.RenderAgents(&buf, BuildAgents(agents, in)); err != nil {
-		t.Fatalf("render: %v", err)
-	}
 	out := buf.String()
-	assertContains(t, "agents", out,
-		"Agents", "machines DockWatch polls, defined in config, read-only here",
-		"reachable", "unreachable", "Docker unavailable",
-		"expires 2026-08-19", "Last successful poll",
-		"Update hub: agent is newer (agent v2, hub v1).",
-		"Renewed bundle not yet installed. Agent still serving the previous certificate.")
-	assertNoBannedGlyph(t, "agents", out)
-}
-
-func TestRenderAgentsEmpty(t *testing.T) {
-	r := testRenderer()
-	var buf bytes.Buffer
-	if err := r.RenderAgents(&buf, BuildAgents(nil, AgentsInput{Theme: "dark"})); err != nil {
-		t.Fatalf("render: %v", err)
+	assertContains(t, "empty dashboard", out,
+		`<span class="idle">No containers found</span>`, "Nothing is running yet on the configured hosts.",
+		`class="dw-btnprimary dw-check dw-checkmob"`)
+	if strings.Contains(out, "data-dw-seg") {
+		t.Error("empty dashboard rendered the View toggle")
 	}
-	assertContains(t, "empty agents", buf.String(),
-		"No machines configured", "DockWatch is watching this host only.")
-	assertNoBannedGlyph(t, "empty agents", buf.String())
+	assertNoBannedGlyph(t, "empty dashboard", out)
 }
 
 func TestRenderSetup(t *testing.T) {

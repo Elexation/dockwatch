@@ -69,7 +69,7 @@ func NewPoller(local localReader, agents []Agent, client *http.Client, st *store
 // configuration order, skipping agents never yet reached. An unreachable
 // agent keeps its last known inventory rather than flapping off the
 // dashboard; the dashboard marks those rows stale from the stored agent
-// status, and the agents page and the down notification carry the same signal.
+// status, and the Settings agent card and the down notification carry the same signal.
 func (p *Poller) AgentInventories() []inventory.Inventory {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -117,7 +117,7 @@ func TestPruneAgents(t *testing.T) {
 		t.Errorf("removed = %v, want [pi]", removed)
 	}
 	if _, found, _ := s.GetAgent("pi"); found {
-		t.Error("pi still stored; its card would linger on the agents page")
+		t.Error("pi still stored; its card would linger in the Settings agent list")
 	}
 	for _, n := range []string{"home", "nas"} {
 		if _, found, _ := s.GetAgent(n); !found {

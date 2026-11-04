@@ -210,7 +210,7 @@ func TestLoginFlow(t *testing.T) {
 func TestGateRedirectsUnauthenticated(t *testing.T) {
 	s, st := newTestServer(t, false)
 	seedAdmin(t, st, "admin", "hunter2pass")
-	for _, path := range []string{"/", "/agents"} {
+	for _, path := range []string{"/", "/settings"} {
 		wantRedirect(t, do(s, "GET", path, nil), "/login")
 	}
 }
@@ -612,7 +612,7 @@ func TestDashboardMarksUnreachableAgentStale(t *testing.T) {
 	}
 }
 
-func TestAgentsPageDockerUnavailable(t *testing.T) {
+func TestSettingsAgentsDockerUnavailable(t *testing.T) {
 	s, st := newTestServerWith(t, false, func(c *Config) {
 		c.AgentInventories = func() []inventory.Inventory {
 			return []inventory.Inventory{{V: 1, Host: "pi4", Docker: inventory.DockerUnavailable}}
@@ -623,11 +623,37 @@ func TestAgentsPageDockerUnavailable(t *testing.T) {
 	}
 	cookie := loginSession(t, s, st)
 
-	rec := do(s, "GET", "/agents", nil, cookie)
+	rec := do(s, "GET", "/settings", nil, cookie)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /agents: code=%d, want 200", rec.Code)
+		t.Fatalf("GET /settings: code=%d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "Docker unavailable") {
-		t.Error("agents page missing the Docker unavailable pill")
+	body := rec.Body.String()
+	for _, want := range []string{"Docker unavailable", "local runs the hub itself"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("settings agents section missing %q", want)
+		}
+	}
+	// The agents page moved into Settings, with no redirect left behind.
+	if rec := do(s, "GET", "/agents", nil, cookie); rec.Code != http.StatusNotFound {
+		t.Errorf("GET /agents: code=%d, want 404", rec.Code)
+	}
+}
+
+func TestDashboardNoticesAgentFlag(t *testing.T) {
+	s, st := newTestServer(t, false)
+	if err := st.PutAgent(store.AgentStatus{
+		Name: "pi4", LastOK: true, LastPoll: time.Now(), LastSuccess: time.Now(),
+		LastRenewalReminder: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cookie := loginSession(t, s, st)
+
+	rec := do(s, "GET", "/", nil, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /: code=%d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "<b>Agent pi4.</b> Renewed bundle not yet installed.") {
+		t.Error("dashboard missing the renewed-bundle notice for pi4")
 	}
 }

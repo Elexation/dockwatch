@@ -70,6 +70,7 @@ func sampleDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 		semverCurrent("pihole/pihole:2024.07.0", "2024.07.0"),
 	}
 
+	agents, _ := sampleAgents()
 	in := DashboardInput{
 		LocalName:        "home",
 		Theme:            "dark",
@@ -80,12 +81,13 @@ func sampleDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 		// from every CheckedAt in the fixture, so the row time cell proves which
 		// of the two it renders.
 		StaleHosts: map[string]time.Time{"pi4": ago(9 * time.Hour)},
+		Agents:     agents,
 	}
 	return []inventory.Inventory{home, server, pi4}, checks, in
 }
 
 // stressDashboard extends sampleDashboard to a 55-row fleet on the same three
-// hosts: the filters, both layouts, and the SEMVER republish at scale.
+// hosts: both layouts and the SEMVER republish at scale.
 func stressDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInput) {
 	invs, checks, in := sampleDashboard()
 
@@ -188,7 +190,9 @@ func stressDashboard() ([]inventory.Inventory, []store.CheckResult, DashboardInp
 	return invs, checks, in
 }
 
-func sampleAgents() ([]store.AgentStatus, AgentsInput) {
+// sampleAgents returns stored agent statuses covering every reach state and
+// flag, plus the agent Docker statuses the poller would report.
+func sampleAgents() ([]store.AgentStatus, map[string]string) {
 	agents := []store.AgentStatus{
 		{Name: "server", LastOK: true, LastPoll: ago(time.Minute), LastSuccess: ago(time.Minute), CertNotAfter: date(2026, 8, 19), LastWireV: 2},
 		{Name: "backup", LastOK: true, LastPoll: ago(5 * time.Minute), LastSuccess: ago(5 * time.Minute), CertNotAfter: date(2031, 3, 4), LastRenewalReminder: ago(24 * time.Hour)},
@@ -197,13 +201,7 @@ func sampleAgents() ([]store.AgentStatus, AgentsInput) {
 		{Name: "pi4", LastOK: false, LastPoll: ago(time.Minute), LastSuccess: ago(9 * time.Hour), CertNotAfter: date(2030, 11, 22)},
 		{Name: "nas", LastOK: true, LastPoll: ago(41 * time.Minute), LastSuccess: ago(41 * time.Minute), CertNotAfter: date(2031, 1, 15)},
 	}
-	in := AgentsInput{
-		Theme:            "dark",
-		LastCycle:        ago(5 * time.Minute),
-		NotificationsOff: true,
-		DockerStatus:     map[string]string{"nas": inventory.DockerUnavailable},
-	}
-	return agents, in
+	return agents, map[string]string{"nas": inventory.DockerUnavailable}
 }
 
 func setupClean() SetupVM {
@@ -224,9 +222,12 @@ func loginBanner() LoginVM {
 }
 
 func settingsClean() SettingsVM {
+	agents, docker := sampleAgents()
 	return SettingsVM{
-		Chrome: ChromeVM{Active: "settings", Theme: "dark", LastCycle: ago(5 * time.Minute), NotificationsOff: true},
-		Fields: passwordFields(),
+		Chrome:    ChromeVM{Active: "settings", Theme: "dark", LastCycle: ago(5 * time.Minute), NotificationsOff: true},
+		Fields:    passwordFields(),
+		LocalName: "home",
+		Agents:    BuildAgentCards(agents, docker),
 	}
 }
 
